@@ -4,21 +4,13 @@ from huggingface_hub import hf_hub_download
 import logging
 
 log = logging.getLogger("unirig")
-# Get models directory from environment or use default
-def _get_models_dir() -> Path:
-    """Get the UniRig models directory."""
-    # Check environment variable first (set by ComfyUI-UniRig)
-    models_dir = os.environ.get('UNIRIG_MODELS_DIR')
-    if models_dir:
-        return Path(models_dir)
 
-    # Fallback: look for ComfyUI models/unirig relative to this file
-    # This file is at: .../ComfyUI-UniRig/nodes/lib/unirig/src/inference/download.py
-    # Models dir is at: .../ComfyUI/models/unirig
-    this_file = Path(__file__).resolve()
-    comfyui_unirig = this_file.parents[5]  # Go up to ComfyUI-UniRig
-    comfyui = comfyui_unirig.parents[1]  # Go up to ComfyUI
-    return comfyui / "models" / "unirig"
+def _get_models_dir() -> Path:
+    """Get the UniRig models directory via ComfyUI's folder_paths."""
+    import folder_paths
+    models_dir = Path(folder_paths.models_dir) / "unirig"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    return models_dir
 
 def download(ckpt_name: str) -> str:
     """Download model checkpoint, returns path to local file."""
