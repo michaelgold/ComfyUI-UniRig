@@ -12,7 +12,7 @@ numpy = "<2.0"
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
-comfy-sparse-attn = "=0.0.8"
+comfy-sparse-attn = "==0.0.8"
 av = "*"
 
 # ML libs
