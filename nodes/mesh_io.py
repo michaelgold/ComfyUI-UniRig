@@ -6,6 +6,10 @@ import os
 import subprocess
 import tempfile
 import numpy as np
+try:
+    import bpy
+except ImportError:
+    pass
 import trimesh
 import igl
 from pathlib import Path
