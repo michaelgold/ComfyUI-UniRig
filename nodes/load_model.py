@@ -11,10 +11,14 @@ import sys
 from pathlib import Path
 
 import torch
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -72,7 +76,7 @@ class UniRigLoadSkeletonModel(io.ComfyNode):
             return io.NodeOutput(cached_model)
 
         # Check for interruption before download
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Download checkpoint
         try:
@@ -147,7 +151,7 @@ class UniRigLoadSkinningModel(io.ComfyNode):
             return io.NodeOutput(cached_model)
 
         # Check for interruption before download
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Download checkpoint
         try:
@@ -234,7 +238,7 @@ class UniRigLoadModel(io.ComfyNode):
         skeleton_model = skeleton_result[0]
 
         # Check for interruption between downloads
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Download skinning checkpoint
         skinning_result = UniRigLoadSkinningModel.execute(model_id=model_id)

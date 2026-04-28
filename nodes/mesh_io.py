@@ -10,9 +10,12 @@ import trimesh
 import igl
 from pathlib import Path
 from typing import Tuple, Optional
-import comfy.model_management
-
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -407,7 +410,7 @@ class UniRigLoadMesh(io.ComfyNode):
                 raise ValueError(error_msg)
 
         # Check for interruption before loading mesh
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Load the mesh
         loaded_mesh, error = load_mesh_file(full_path)

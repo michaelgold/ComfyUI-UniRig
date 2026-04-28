@@ -15,9 +15,12 @@ import torch
 import torch.nn.functional as F
 import trimesh
 
-import comfy.model_management
-
 from .utils import sample_mesh
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 from .dataset_mixamo import MIXAMO_PREFIX
 from . import BONES_IDX_DICT, KINEMATIC_TREE
 
@@ -261,7 +264,7 @@ def preprocess(
     verts = norm.transform_points(verts)
 
     # Run coarse joint localization
-    comfy.model_management.load_models_gpu([patcher_coarse])
+    _mm().load_models_gpu([patcher_coarse])
     model_coarse = patcher_coarse.model
     with torch.no_grad():
         pts_device = pts.to(device=device)
@@ -395,14 +398,14 @@ def infer(
 
     with torch.no_grad():
         # Blend weights inference
-        comfy.model_management.load_models_gpu([patcher_bw])
+        _mm().load_models_gpu([patcher_bw])
         pts_device = pts.to(**_to)
         verts_device = verts.to(**_to)
 
         bw = _chunked_bw(patcher_bw.model, pts_device, verts_device)
 
         if use_normal and pts_normal is not None:
-            comfy.model_management.load_models_gpu([patcher_bw_normal])
+            _mm().load_models_gpu([patcher_bw_normal])
             pts_normal_device = pts_normal.to(**_to)
             verts_normal_device = verts_normal.to(**_to) if verts_normal is not None else None
 
@@ -427,11 +430,11 @@ def infer(
         bw = bw.cpu()
 
         # Joints inference
-        comfy.model_management.load_models_gpu([patcher_joints])
+        _mm().load_models_gpu([patcher_joints])
         joints_out = patcher_joints.model(pts_device).joints.cpu()
 
         # Pose inference
-        comfy.model_management.load_models_gpu([patcher_pose])
+        _mm().load_models_gpu([patcher_pose])
         joints_for_pose = joints_out.clone().to(**_to)
         pose = patcher_pose.model(pts_device, joints=joints_for_pose).pose_trans.cpu()
 

@@ -11,12 +11,16 @@ import torch
 import numpy as np
 from typing import Optional, Dict, Any, Tuple, List
 import logging
-import comfy.model_management
 import comfy.model_patcher
 import comfy.ops
 import comfy.utils
 
 log = logging.getLogger("unirig")
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # Local model cache for the worker process. Keeps loaded models + ModelPatchers
 # in memory across prompt executions within the same persistent worker.
@@ -118,7 +122,7 @@ def normalize_vertices(vertices: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]
 
 def _get_device():
     """Get the best available device."""
-    return comfy.model_management.get_torch_device()
+    return _mm().get_torch_device()
 
 
 _DTYPE_MAP = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
@@ -355,7 +359,7 @@ def get_skeleton_model(
         model, tokenizer = _load_skeleton_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
-        load_device = comfy.model_management.get_torch_device()
+        load_device = _mm().get_torch_device()
         offload_device = torch.device("cpu")
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
@@ -382,7 +386,7 @@ def get_skin_model(
         model = _load_skin_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
-        load_device = comfy.model_management.get_torch_device()
+        load_device = _mm().get_torch_device()
         offload_device = torch.device("cpu")
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
@@ -427,7 +431,7 @@ def predict_skeleton(
 
     # Let ComfyUI manage GPU memory — beam search (15 beams × 2048 tokens) needs ~2 GB
     memory_required = 2 * 1024 * 1024 * 1024
-    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
+    _mm().load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
 
     if device.type == 'cuda':
@@ -532,7 +536,7 @@ def predict_skinning(
 
     # Let ComfyUI manage GPU memory — skinning forward pass needs ~1 GB
     memory_required = 1 * 1024 * 1024 * 1024
-    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
+    _mm().load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
 
     if device.type == 'cuda':

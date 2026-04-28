@@ -13,10 +13,14 @@ import numpy as np
 import trimesh
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -151,7 +155,7 @@ def create_wireframe_visualization(mesh: trimesh.Trimesh, width: int, height: in
         edges = edges[indices]
 
     for edge in edges:
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
         v1, v2 = vertices[edge[0]], vertices[edge[1]]
         p1 = to_img_coords(v1[0], v1[1])
         p2 = to_img_coords(v2[0], v2[1])
@@ -316,7 +320,7 @@ class UniRigOrientationCheck(io.ComfyNode):
             log.warning("[WARNING] %s is tallest, expected Y for Y-up", tallest_axis)
 
         # Check for interruption before rendering
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Load reference mesh
         ref_mesh = load_reference_mesh()

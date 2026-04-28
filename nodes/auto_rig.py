@@ -9,10 +9,14 @@ import sys
 import time
 
 import numpy as np
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -102,7 +106,7 @@ class UniRigAutoRig(io.ComfyNode):
         # Step 1: Extract skeleton
         log.info("Step 1/2: Extracting skeleton...")
         import torch
-        dev = comfy.model_management.get_torch_device()
+        dev = _mm().get_torch_device()
         if dev.type == 'cuda':
             a = torch.cuda.memory_allocated(dev) / (1024**3)
             r = torch.cuda.memory_reserved(dev) / (1024**3)
@@ -127,7 +131,7 @@ class UniRigAutoRig(io.ComfyNode):
         pbar.update(1)
 
         # Check for interruption before skinning
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Step 2: Apply skinning
         log.info("Step 2/2: Applying skinning...")

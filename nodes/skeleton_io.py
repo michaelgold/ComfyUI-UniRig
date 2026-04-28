@@ -10,9 +10,12 @@ import pickle
 import json
 import folder_paths
 import logging
-import comfy.model_management
-
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -131,7 +134,7 @@ class UniRigLoadRiggedMesh(io.ComfyNode):
             log.info("Using existing file from output: %s", output_filename)
 
         # Check for interruption before bpy operations
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Extract mesh info using bpy
         mesh_info = {}
@@ -343,7 +346,7 @@ class UniRigExportPosedFBX(io.ComfyNode):
         output_fbx_path = os.path.join(output_dir, output_filename)
 
         # Check for interruption before export
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Use direct bpy export
         try:

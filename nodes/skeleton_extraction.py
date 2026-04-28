@@ -13,10 +13,14 @@ from trimesh import Trimesh
 import time
 import folder_paths
 import logging
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 TARGET_FACE_COUNT = 50000  # default for mesh decimation
@@ -364,7 +368,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
             pbar.update(1)
 
             # Check for interruption before inference
-            comfy.model_management.throw_exception_if_processing_interrupted()
+            _mm().throw_exception_if_processing_interrupted()
 
             # Step 2: Run skeleton inference
             step_start = time.time()
@@ -442,7 +446,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
             pbar.update(1)
 
             # Check for interruption before post-processing
-            comfy.model_management.throw_exception_if_processing_interrupted()
+            _mm().throw_exception_if_processing_interrupted()
 
             # Step 3: Process results
             step_start = time.time()
@@ -599,7 +603,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
                 # Compute tails
                 tails = np.zeros((num_bones, 3))
                 for i in range(num_bones):
-                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    _mm().throw_exception_if_processing_interrupted()
                     children = [j for j, p in enumerate(parents_list) if p == i]
                     if children:
                         tails[i] = np.mean([bone_joints[c] for c in children], axis=0)
@@ -619,7 +623,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
 
                 tails = np.zeros_like(bone_joints)
                 for i in range(num_bones):
-                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    _mm().throw_exception_if_processing_interrupted()
                     children = [j for j, p in enumerate(parents_list) if p == i]
                     if children:
                         tails[i] = np.mean([bone_joints[c] for c in children], axis=0)
@@ -656,7 +660,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
                 missing_joints = []
 
                 for smpl_name in SMPL_JOINT_NAMES:
-                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    _mm().throw_exception_if_processing_interrupted()
                     # Find corresponding VRoid bone name
                     vroid_name = None
                     for vn, sn in VROID_TO_SMPL_BONE_MAP.items():
@@ -686,7 +690,7 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
                 tails = np.zeros((num_smpl_joints, 3))
 
                 for i, joint_name in enumerate(SMPL_JOINT_NAMES):
-                    comfy.model_management.throw_exception_if_processing_interrupted()
+                    _mm().throw_exception_if_processing_interrupted()
                     # Get canonical bone direction
                     direction = np.array(SMPL_BONE_DIRECTIONS.get(joint_name, [0, 1, 0]))
 

@@ -13,10 +13,14 @@ import shutil
 import numpy as np
 import time
 import folder_paths
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -153,7 +157,7 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
         }
 
         # Check for interruption before data preparation
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Add mesh data
         mesh_data_mapping = {
@@ -209,7 +213,7 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
         pbar.update(1)
 
         # Check for interruption before inference
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Run skinning inference
         step_start = time.time()
@@ -304,7 +308,7 @@ class UniRigApplySkinningMLNew(io.ComfyNode):
         pbar.update(1)
 
         # Check for interruption before FBX export
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Generate FBX output using direct bpy export
         log.info(f"Generating FBX...")

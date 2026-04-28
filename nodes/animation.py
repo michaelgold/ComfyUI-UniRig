@@ -5,10 +5,14 @@ UniRig Animation Node - Apply animations to rigged meshes
 import os
 import time
 from pathlib import Path
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -191,7 +195,7 @@ class UniRigApplyAnimation(io.ComfyNode):
         log.info("Output: %s", output_path)
 
         # Check for interruption before heavy animation processing
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Run direct animation module
         log.info("Applying animation...")

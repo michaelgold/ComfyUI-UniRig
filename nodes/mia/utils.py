@@ -13,9 +13,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import trimesh
 import logging
-import comfy.model_management
-
 log = logging.getLogger("unirig")
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 # Pure PyTorch implementations of pytorch3d quaternion functions
 # These replace the pytorch3d.transforms dependency
 
@@ -351,7 +354,7 @@ def synchronize():
 def init_dist():
     from datetime import timedelta
 
-    device = comfy.model_management.get_torch_device()
+    device = _mm().get_torch_device()
     assert device.type != "cpu", "No accelerator available (need CUDA or similar)"
     assert (
         "RANK" in os.environ and "WORLD_SIZE" in os.environ

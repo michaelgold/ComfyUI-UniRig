@@ -5,10 +5,14 @@ MIAAutoRig - Fast humanoid rigging using Make-It-Animatable.
 import logging
 import time
 from pathlib import Path
-import comfy.model_management
 import comfy.utils
 
 from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -99,7 +103,7 @@ class MIAAutoRig(io.ComfyNode):
         pbar.update(1)
 
         # Check for interruption before inference
-        comfy.model_management.throw_exception_if_processing_interrupted()
+        _mm().throw_exception_if_processing_interrupted()
 
         # Generate output filename
         if fbx_name:
