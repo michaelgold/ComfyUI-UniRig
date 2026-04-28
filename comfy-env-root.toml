@@ -2,4 +2,5 @@
 ComfyUI-CameraPack = "PozzettiAndrea/ComfyUI-CameraPack"
 
 [dependencies]
+av = "*"
 ffmpeg = "*"
