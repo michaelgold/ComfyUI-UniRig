@@ -1,7 +1,8 @@
 python = "3.11"  # Required by bpy 4.2
 
 [dependencies]
-c-compiler = "*"     # needed by triton JIT
+c-compiler = "*"
+av = "*"
 
 [target.linux-64.dependencies]
 mesalib = "*"        # replaces apt: libgl1-mesa-glx
