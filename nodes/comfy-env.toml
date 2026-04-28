@@ -3,6 +3,7 @@ python = "3.11"  # Required by bpy 4.2
 [dependencies]
 c-compiler = "*"
 av = "*"
+numpy = "<2.0"
 
 [target.linux-64.dependencies]
 mesalib = "*"        # replaces apt: libgl1-mesa-glx
@@ -14,7 +15,6 @@ packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
 [pypi-dependencies]
 # Blender
 bpy = ">=4.2,<4.3"
-numpy = "<2.0"
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
