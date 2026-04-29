@@ -10,6 +10,7 @@ igl = "*"
 [target.linux-64.dependencies]
 mesalib = "*"        # replaces apt: libgl1-mesa-glx
 libglu = "*"         # replaces apt: libglu1-mesa
+xorg-libsm = "*"     # libSM.so.6 required by bpy
 
 [cuda]
 packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
