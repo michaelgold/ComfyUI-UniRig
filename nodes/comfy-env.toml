@@ -6,6 +6,7 @@ av = "*"
 numpy = "<2.0"
 ffmpeg = "*"
 igl = "*"
+cuda-cccl = "*"
 
 [target.linux-64.dependencies]
 mesalib = "*"        # replaces apt: libgl1-mesa-glx
