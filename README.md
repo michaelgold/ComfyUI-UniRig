@@ -1,5 +1,21 @@
 # ComfyUI-UniRig
 
+## Installation
+
+Three options, in order of speed → reliability:
+
+1. **ComfyUI Manager (nightly)** — search for `ComfyUI-UniRig` in the Manager and click Install. Fastest, but the Manager's nightly index can lag.
+2. **Manager via Git URL** — in ComfyUI Manager: "Install via Git URL" with `https://github.com/PozzettiAndrea/ComfyUI-UniRig.git`.
+3. **Manual (most reliable)**:
+   ```bash
+   cd ComfyUI/custom_nodes
+   git clone https://github.com/PozzettiAndrea/ComfyUI-UniRig.git
+   cd ComfyUI-UniRig
+   pip install -r requirements.txt --upgrade
+   python install.py
+   ```
+
+
 <div align="center">
 <a href="https://pozzettiandrea.github.io/ComfyUI-UniRig/">
 <img src="https://pozzettiandrea.github.io/ComfyUI-UniRig/gallery-preview.png" alt="Workflow Test Gallery" width="800">
@@ -31,14 +47,6 @@ Manipulation/saving/export:
 
 
 https://github.com/user-attachments/assets/f320db66-4323-4993-a46e-87e2717748ef
-
-## Installation
-
-### Via ComfyUI Manager (Recommended)
-1. Open ComfyUI Manager
-2. Search for "UniRig"
-3. Click Install
-4. Restart ComfyUI
 
 ## Community
 
