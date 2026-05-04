@@ -15,6 +15,9 @@ Three options, in order of speed → reliability:
    python install.py
    ```
 
+---
+
+
 
 <div align="center">
 <a href="https://pozzettiandrea.github.io/ComfyUI-UniRig/">
@@ -35,7 +38,6 @@ Rig your character mesh and skin it!
 Change their pose, export a new one
 ![rigging_manipulation](docs/rigging_manipulation.png)
 
----
 
 
 ## Video demos
