@@ -35,6 +35,9 @@ Rig your character mesh and skin it!
 Change their pose, export a new one
 ![rigging_manipulation](docs/rigging_manipulation.png)
 
+---
+
+
 ## Video demos
 
 Rigging/skinning workflow (video is sped up for documentation purposes):
