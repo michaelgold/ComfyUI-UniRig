@@ -48,7 +48,7 @@ def action_fcurves(action):
 
     # Slotted action (Blender 4.4+, action freshly created by
     # bpy.data.actions.new() with no slot yet).
-    # Seed slot → layer → strip → channelbag → return its fcurves.
+    # Seed slot -> layer -> strip -> channelbag -> return its fcurves.
     if not action.slots:
         action.slots.new(id_type='OBJECT', name="ActionSlot")
     slot = action.slots[0]
