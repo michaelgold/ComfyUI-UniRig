@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-unirig"
 description = "Automatic skeleton extraction for ComfyUI using UniRig (SIGGRAPH 2025)"
-version = "1.5.8"
+version = "1.5.9"
 license = {file = "LICENSE"}
 
 [project.urls]
