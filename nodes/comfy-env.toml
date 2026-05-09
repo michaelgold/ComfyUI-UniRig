@@ -26,8 +26,8 @@ packages = ["torch-scatter", "torch-cluster", "flash-attn", "cumm", "spconv"]
 trimesh = { version = "*", extras = ["easy"] }
 psutil = "*"
 comfy-aimdo = "*"
-comfy-sparse-attn = "==0.0.8"
-transformers = "==4.51.3"
+comfy-sparse-attn = "==0.0.9"
+transformers = "*"
 pytorch-lightning = "*"
 timm = "*"
 einops = "*"
