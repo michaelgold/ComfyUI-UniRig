@@ -831,7 +831,9 @@ class UniRigExtractSkeletonNew(io.ComfyNode):
                 log.info("Rotated to SMPL Y-up coordinate system")
 
             # Save as RawData NPZ for skinning phase
-            persistent_npz = os.path.join(folder_paths.get_temp_directory(), f"skeleton_{seed}.npz")
+            temp_dir = folder_paths.get_temp_directory()
+            os.makedirs(temp_dir, exist_ok=True)
+            persistent_npz = os.path.join(temp_dir, f"skeleton_{seed}.npz")
             np.savez(
                 persistent_npz,
                 vertices=mesh_vertices,

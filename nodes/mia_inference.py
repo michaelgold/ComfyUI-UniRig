@@ -363,7 +363,9 @@ def run_mia_inference(
     log.info("reset_to_rest=%s, data.pose is None: %s", reset_to_rest, data.pose is None)
     if data.pose is not None:
         log.info("Pose shape: %s", data.pose.shape)
-        pose_debug_path = os.path.join(folder_paths.get_temp_directory(), "mia_pose_debug.npy")
+        temp_dir = folder_paths.get_temp_directory()
+        os.makedirs(temp_dir, exist_ok=True)
+        pose_debug_path = os.path.join(temp_dir, "mia_pose_debug.npy")
         np.save(pose_debug_path, data.pose.squeeze(0).float().numpy())
         log.debug("Saved pose data to %s", pose_debug_path)
 
