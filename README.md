@@ -1,5 +1,5 @@
 > [!NOTE]
-> Comfy3D fork: this branch does not use `comfy-env` or pixi. Dependencies are installed directly by the Comfy3D Docker image, including Blender's Python module (`bpy`). This fork also bundles Auto-Rig Pro under `third_party/auto_rig_pro` and installs it at ComfyUI startup so UniRig owns its Blender add-on dependency.
+> Comfy3D fork: this branch does not use `comfy-env` or pixi. Dependencies are installed directly by the Comfy3D Docker image, including Blender's Python module (`bpy`). This fork also carries Auto-Rig Pro files under `third_party/auto_rig_pro` so UniRig owns its Blender add-on dependency.
 
 # ComfyUI-UniRig
 

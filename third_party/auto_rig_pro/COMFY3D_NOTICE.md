@@ -10,4 +10,4 @@ Licensing from upstream `LICENSE.txt` and `blender_manifest.toml`:
 - Asset files such as icons and rig components in `.blend` format: Royalty Free license and CC0; see subfolder license files.
 - Generated rigs are the sole property of the end user according to upstream `LICENSE.txt`.
 
-This copy is installed into the Docker image using `utils/install_blender_addon_zip.py` so it runs inside the same controlled Python/Blender environment as Comfy3D's `bpy==5.0.1` install.
+This copy is carried by the Comfy3D UniRig fork under `third_party/auto_rig_pro` so the UniRig custom node owns its Blender add-on dependency. Comfy3D Docker provides the controlled Python/Blender runtime, including `bpy==5.0.1`; UniRig does not install or enable this add-on from `prestartup_script.py`.
