@@ -30,7 +30,7 @@ COMFYUI_DIR = SCRIPT_DIR.parent.parent
 
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from utils.install_blender_addon import install_bundled_addon
+from unirig_utils.install_blender_addon import install_bundled_addon
 
 # Install bundled Blender add-ons
 install_bundled_addon(SCRIPT_DIR / "third_party/auto_rig_pro", "auto_rig_pro")
