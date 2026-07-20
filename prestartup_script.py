@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import shutil
+import sys
 
 from comfy_3d_viewers import copy_viewer
 
@@ -26,6 +27,13 @@ def copy_files(src, dst, pattern="*", overwrite=False):
 
 SCRIPT_DIR = Path(__file__).parent
 COMFYUI_DIR = SCRIPT_DIR.parent.parent
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from utils.install_blender_addon import install_bundled_addon
+
+# Install bundled Blender add-ons
+install_bundled_addon(SCRIPT_DIR / "third_party/auto_rig_pro", "auto_rig_pro")
 
 # Copy viewers
 copy_viewer("fbx", SCRIPT_DIR / "web")
