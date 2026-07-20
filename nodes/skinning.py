@@ -1,7 +1,7 @@
 """
 Skinning nodes for UniRig - Apply skinning weights using ML models.
 
-Uses comfy-env isolated environment for GPU dependencies.
+Comfy3D fork: GPU dependencies are installed directly in the Comfy3D Docker environment.
 Uses direct Python inference with bpy for FBX export.
 """
 

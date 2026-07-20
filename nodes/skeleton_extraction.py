@@ -1,7 +1,7 @@
 """
 Skeleton extraction nodes for UniRig.
 
-Uses comfy-env isolated environment for GPU dependencies.
+Comfy3D fork: GPU dependencies are installed directly in the Comfy3D Docker environment.
 Uses direct Python inference with bpy for mesh preprocessing.
 """
 

@@ -1,5 +1,5 @@
-> [!WARNING]
-> Warning, uses experimental package `comfy-env` to attempt a one click isolated install. Will download and use pixi package manager.
+> [!NOTE]
+> Comfy3D fork: this branch does not use `comfy-env` or pixi. Dependencies are installed directly by the Comfy3D Docker image, including Blender's Python module (`bpy`).
 
 # ComfyUI-UniRig
 
