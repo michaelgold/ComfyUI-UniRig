@@ -263,6 +263,7 @@ def run_mia_inference(
     no_fingers: bool = True,
     use_normal: bool = False,
     reset_to_rest: bool = True,
+    target_face_count: int | None = 50000,
 ) -> str:
     """
     Run Make-It-Animatable inference on a mesh.
@@ -290,8 +291,32 @@ def run_mia_inference(
     dtype = models["dtype"]
 
     log.info("Starting MIA inference (device=%s, dtype=%s)...", device, dtype)
-    log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s", no_fingers, use_normal, reset_to_rest)
+    log.info(
+        "Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s",
+        no_fingers,
+        use_normal,
+        reset_to_rest,
+        target_face_count,
+    )
     log.info("Input mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
+
+    if target_face_count is not None and target_face_count > 0 and len(mesh.faces) > target_face_count:
+        log.info("Simplifying MIA input mesh from %d faces to target %d faces...", len(mesh.faces), target_face_count)
+        simplify = getattr(mesh, "simplify_quadric_decimation", None)
+        if simplify is None:
+            simplify = getattr(mesh, "simplify_quadratic_decimation", None)
+        if simplify is None:
+            log.warning("trimesh simplification is unavailable; continuing with %d faces", len(mesh.faces))
+        else:
+            try:
+                simplified = simplify(face_count=int(target_face_count))
+            except TypeError:
+                simplified = simplify(int(target_face_count))
+            if simplified is not None and hasattr(simplified, "faces") and len(simplified.faces) > 0:
+                mesh = simplified
+                log.info("Simplified MIA input mesh to %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
+            else:
+                log.warning("trimesh simplification returned no usable mesh; continuing with %d faces", len(mesh.faces))
 
     # Progress bar for the 4-step MIA inference pipeline + export
     pbar = comfy.utils.ProgressBar(5)

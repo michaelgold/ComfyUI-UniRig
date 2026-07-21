@@ -53,6 +53,9 @@ class MIAAutoRig(io.ComfyNode):
                                  tooltip="Use surface normals for better skinning weights. Helps when limbs are close together."),
                 io.Boolean.Input("reset_to_rest", default=True, optional=True,
                                  tooltip="Transform output to T-pose rest position for animation compatibility."),
+                io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
+                             optional=True,
+                             tooltip="Simplify the mesh to this face count before MIA inference/export. Lower values make Blender FBX export more stable in CI."),
             ],
             outputs=[
                 io.String.Output(display_name="fbx_output_path"),
@@ -68,6 +71,7 @@ class MIAAutoRig(io.ComfyNode):
         no_fingers=True,
         use_normal=False,
         reset_to_rest=True,
+        target_face_count=50000,
     ):
         """
         Complete rigging pipeline using Make-It-Animatable.
@@ -91,7 +95,7 @@ class MIAAutoRig(io.ComfyNode):
         pbar = comfy.utils.ProgressBar(3)
 
         log.info("Starting Make-It-Animatable rigging pipeline...")
-        log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s", no_fingers, use_normal, reset_to_rest)
+        log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s", no_fingers, use_normal, reset_to_rest, target_face_count)
 
         # model is a config dict from MIALoadModel - extract settings
         dtype = model.get("dtype", "fp32")
@@ -124,6 +128,7 @@ class MIAAutoRig(io.ComfyNode):
             no_fingers=no_fingers,
             use_normal=use_normal,
             reset_to_rest=reset_to_rest,
+            target_face_count=target_face_count,
         )
 
         pbar.update(2)
