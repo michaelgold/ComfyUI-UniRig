@@ -56,6 +56,8 @@ class MIAAutoRig(io.ComfyNode):
                 io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
                              optional=True,
                              tooltip="Simplify the mesh to this face count before MIA inference/export. Lower values make Blender FBX export more stable in CI."),
+                io.Boolean.Input("embed_textures", default=True, optional=True,
+                                 tooltip="Embed textures in the intermediate FBX. Disable for CI/headless runs if Blender FBX export is unstable."),
             ],
             outputs=[
                 io.String.Output(display_name="fbx_output_path"),
@@ -72,6 +74,7 @@ class MIAAutoRig(io.ComfyNode):
         use_normal=False,
         reset_to_rest=True,
         target_face_count=50000,
+        embed_textures=True,
     ):
         """
         Complete rigging pipeline using Make-It-Animatable.
@@ -95,7 +98,7 @@ class MIAAutoRig(io.ComfyNode):
         pbar = comfy.utils.ProgressBar(3)
 
         log.info("Starting Make-It-Animatable rigging pipeline...")
-        log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s", no_fingers, use_normal, reset_to_rest, target_face_count)
+        log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s, embed_textures=%s", no_fingers, use_normal, reset_to_rest, target_face_count, embed_textures)
 
         # model is a config dict from MIALoadModel - extract settings
         dtype = model.get("dtype", "fp32")
@@ -129,6 +132,7 @@ class MIAAutoRig(io.ComfyNode):
             use_normal=use_normal,
             reset_to_rest=reset_to_rest,
             target_face_count=target_face_count,
+            embed_textures=embed_textures,
         )
 
         pbar.update(2)

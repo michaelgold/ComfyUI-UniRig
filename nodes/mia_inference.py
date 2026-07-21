@@ -264,6 +264,7 @@ def run_mia_inference(
     use_normal: bool = False,
     reset_to_rest: bool = True,
     target_face_count: int | None = 50000,
+    embed_textures: bool = True,
 ) -> str:
     """
     Run Make-It-Animatable inference on a mesh.
@@ -292,11 +293,12 @@ def run_mia_inference(
 
     log.info("Starting MIA inference (device=%s, dtype=%s)...", device, dtype)
     log.info(
-        "Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s",
+        "Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s, embed_textures=%s",
         no_fingers,
         use_normal,
         reset_to_rest,
         target_face_count,
+        embed_textures,
     )
     log.info("Input mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
 
@@ -414,7 +416,7 @@ def run_mia_inference(
 
     # Export to FBX using MIA's Blender integration
     log.info("Exporting to FBX...")
-    _export_mia_fbx(output_data, output_path, no_fingers, reset_to_rest)
+    _export_mia_fbx(output_data, output_path, no_fingers, reset_to_rest, embed_textures=embed_textures)
 
     pbar.update(1)
     log.info("Inference complete: %s", output_path)
@@ -427,6 +429,7 @@ def _export_mia_fbx_direct(
     remove_fingers: bool,
     reset_to_rest: bool,
     template_path: Path,
+    embed_textures: bool = True,
 ) -> None:
     """
     Export MIA results to FBX using bpy directly (inlined, no imports needed).
@@ -629,32 +632,34 @@ def _export_mia_fbx_direct(
             log.info("Applying pose-to-rest transformation...")
             _apply_pose_to_rest_inline(armature, pose, bones_idx_dict, parent_indices, input_meshes, joints_normalized, template_bone_data)
 
-        # Fix image filepaths and pack for FBX embedding
-        # FBX exporter needs proper filepaths with filenames, not just directories
-        log.debug("Fixing image filepaths for FBX export...")
-        fbm_dir = output_path.rsplit('.', 1)[0] + '.fbm'
-        os.makedirs(fbm_dir, exist_ok=True)
+        if embed_textures:
+            # Fix image filepaths and pack for FBX embedding.
+            # FBX exporter needs proper filepaths with filenames, not just directories.
+            log.debug("Fixing image filepaths for FBX export...")
+            fbm_dir = output_path.rsplit('.', 1)[0] + '.fbm'
+            os.makedirs(fbm_dir, exist_ok=True)
 
-        for img in bpy.data.images:
-            if img.size[0] > 0 and img.size[1] > 0:  # Valid image
-                # Create a proper filepath with filename
-                img_filename = f"{img.name}.png"
-                img_filepath = os.path.join(fbm_dir, img_filename)
+            for img in bpy.data.images:
+                if img.size[0] > 0 and img.size[1] > 0:  # Valid image
+                    # Create a proper filepath with filename
+                    img_filename = f"{img.name}.png"
+                    img_filepath = os.path.join(fbm_dir, img_filename)
 
-                # Save the image to disk first (FBX exporter needs this)
-                old_filepath = img.filepath
-                img.filepath_raw = img_filepath
-                img.file_format = 'PNG'
-                img.save()
-                log.debug("Saved texture: %s", img_filepath)
+                    # Save the image to disk first (FBX exporter needs this)
+                    img.filepath_raw = img_filepath
+                    img.file_format = 'PNG'
+                    img.save()
+                    log.debug("Saved texture: %s", img_filepath)
 
-                # Now pack it
-                if img.packed_file is None:
-                    try:
-                        img.pack()
-                        log.debug("Packed: %s", img.name)
-                    except Exception as e:
-                        log.debug("Failed to pack %s: %s", img.name, e)
+                    # Now pack it
+                    if img.packed_file is None:
+                        try:
+                            img.pack()
+                            log.debug("Packed: %s", img.name)
+                        except Exception as e:
+                            log.debug("Failed to pack %s: %s", img.name, e)
+        else:
+            log.info("Skipping FBX texture embedding for stable headless export")
 
         # Export FBX
         bpy.context.view_layer.update()
@@ -664,8 +669,8 @@ def _export_mia_fbx_direct(
             object_types={'ARMATURE', 'MESH'},
             add_leaf_bones=False,
             bake_anim=False,
-            path_mode='COPY',
-            embed_textures=True,
+            path_mode='COPY' if embed_textures else 'AUTO',
+            embed_textures=embed_textures,
         )
         log.info("Exported to: %s", output_path)
 
@@ -819,6 +824,7 @@ def _export_mia_fbx(
     output_path: str,
     remove_fingers: bool,
     reset_to_rest: bool,
+    embed_textures: bool = True,
 ) -> None:
     """
     Export MIA results to FBX using bpy directly.
@@ -839,7 +845,7 @@ def _export_mia_fbx(
         )
 
     log.info("Exporting FBX via bpy...")
-    _export_mia_fbx_direct(data, output_path, remove_fingers, reset_to_rest, template_path)
+    _export_mia_fbx_direct(data, output_path, remove_fingers, reset_to_rest, template_path, embed_textures=embed_textures)
 
     if not os.path.exists(output_path):
         raise RuntimeError(f"Export completed but output file not created: {output_path}")
