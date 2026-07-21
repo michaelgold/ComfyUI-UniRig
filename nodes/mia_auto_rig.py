@@ -28,10 +28,10 @@ class MIAAutoRig(io.ComfyNode):
     """
     Fast humanoid rigging using Make-It-Animatable.
 
-    Takes a mesh and outputs a Mixamo-compatible rigged FBX file.
+    Takes a mesh and outputs a Mixamo-compatible rigged GLB or FBX file.
     Optimized for humanoid characters - faster than UniRig (<1 second).
 
-    Outputs FBX with Mixamo skeleton ready for Mixamo animations.
+    Outputs a rigged GLB by default to avoid Blender FBX exporter instability in headless CI.
     """
 
     @classmethod
@@ -46,7 +46,9 @@ class MIAAutoRig(io.ComfyNode):
                 io.Custom("MIA_MODEL").Input("model",
                     tooltip="Pre-loaded MIA model (from MIALoadModel)"),
                 io.String.Input("fbx_name", default="", optional=True,
-                                tooltip="Custom filename for saved FBX (without extension). If empty, uses auto-generated name."),
+                                tooltip="Custom base filename for saved rigged output (without extension). If empty, uses auto-generated name."),
+                io.Combo.Input("output_format", options=["glb", "fbx"], default="glb", optional=True,
+                               tooltip="Rigged output format. GLB avoids Blender FBX exporter instability in headless CI."),
                 io.Boolean.Input("no_fingers", default=True, optional=True,
                                  tooltip="Merge finger weights to hand bone. Enable if model doesn't have separate fingers."),
                 io.Boolean.Input("use_normal", default=False, optional=True,
@@ -70,6 +72,7 @@ class MIAAutoRig(io.ComfyNode):
         trimesh,
         model,
         fbx_name="",
+        output_format="glb",
         no_fingers=True,
         use_normal=False,
         reset_to_rest=True,
@@ -82,7 +85,7 @@ class MIAAutoRig(io.ComfyNode):
         1. Sample points from mesh surface
         2. Normalize and localize joints (coarse)
         3. Predict blend weights, joint positions, and pose
-        4. Post-process and export FBX
+        4. Post-process and export rigged GLB/FBX
         """
         # Lazy import - only run in isolated worker
         from .mia_inference import load_mia_models, get_cached_models, run_mia_inference
@@ -97,8 +100,12 @@ class MIAAutoRig(io.ComfyNode):
         # Progress bar for MIA pipeline steps (load models, inference, export)
         pbar = comfy.utils.ProgressBar(3)
 
+        output_format = (output_format or "glb").lower()
+        if output_format not in {"glb", "fbx"}:
+            raise ValueError(f"Unsupported MIA output_format: {output_format}")
+
         log.info("Starting Make-It-Animatable rigging pipeline...")
-        log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s, embed_textures=%s", no_fingers, use_normal, reset_to_rest, target_face_count, embed_textures)
+        log.info("Options: output_format=%s, no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s, embed_textures=%s", output_format, no_fingers, use_normal, reset_to_rest, target_face_count, embed_textures)
 
         # model is a config dict from MIALoadModel - extract settings
         dtype = model.get("dtype", "fp32")
@@ -114,10 +121,10 @@ class MIAAutoRig(io.ComfyNode):
 
         # Generate output filename
         if fbx_name:
-            output_filename = f"{fbx_name}_mia.fbx"
+            output_filename = f"{fbx_name}_mia.{output_format}"
         else:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            output_filename = f"rigged_mia_{timestamp}.fbx"
+            output_filename = f"rigged_mia_{timestamp}.{output_format}"
 
         # Ensure output directory exists
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

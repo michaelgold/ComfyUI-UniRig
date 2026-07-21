@@ -632,6 +632,24 @@ def _export_mia_fbx_direct(
             log.info("Applying pose-to-rest transformation...")
             _apply_pose_to_rest_inline(armature, pose, bones_idx_dict, parent_indices, input_meshes, joints_normalized, template_bone_data)
 
+        # Export directly to GLB when requested. This avoids Blender's FBX exporter,
+        # which can segfault in headless CUDA CI even after MIA inference succeeds.
+        if output_path.lower().endswith(".glb"):
+            bpy.context.view_layer.update()
+            export_result = bpy.ops.export_scene.gltf(
+                filepath=output_path,
+                export_format='GLB',
+                export_texcoords=True,
+                export_normals=True,
+                export_materials='EXPORT',
+                export_image_format='AUTO',
+                check_existing=False,
+            )
+            if "FINISHED" not in export_result:
+                raise RuntimeError(f"Failed to export GLB: {output_path}")
+            log.info("Exported rigged GLB to: %s", output_path)
+            return
+
         if embed_textures:
             # Fix image filepaths and pack for FBX embedding.
             # FBX exporter needs proper filepaths with filenames, not just directories.
@@ -844,7 +862,7 @@ def _export_mia_fbx(
             "Ensure you are running in the unirig isolated environment."
         )
 
-    log.info("Exporting FBX via bpy...")
+    log.info("Exporting rigged asset via bpy: %s", output_path)
     _export_mia_fbx_direct(data, output_path, remove_fingers, reset_to_rest, template_path, embed_textures=embed_textures)
 
     if not os.path.exists(output_path):
