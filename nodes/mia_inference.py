@@ -404,8 +404,8 @@ def run_mia_inference(
         "joints_tail": joints_np[..., 3:] if joints_np.shape[-1] > 3 else None,
         "bw": bw.squeeze(0).float().numpy(),
         "pose": data.pose.squeeze(0).float().numpy() if reset_to_rest and data.pose is not None else None,
-        "bones_idx_dict": BONES_IDX_DICT,
-        "parent_indices": KINEMATIC_TREE.parent_indices,
+        "bones_idx_dict": dict(BONES_IDX_DICT),
+        "parent_indices": list(KINEMATIC_TREE.parent_indices),
         "pose_ignore_list": [],
     }
 
@@ -439,33 +439,39 @@ def _export_mia_fbx_direct(
     import bpy  # Lazy import - only imported here AFTER torch_cluster loaded
     from mathutils import Vector, Matrix
 
-    mesh = data["mesh"]
+    mesh = data.get("mesh")
+    mesh_path = data.get("mesh_path")
     joints = data["joints"]
     joints_tail = data.get("joints_tail")
     bw = data["bw"]
     pose = data.get("pose")
     bones_idx_dict = dict(data["bones_idx_dict"])
 
-    log.debug("Mesh to export: %d verts, %d faces, visual=%s",
-              len(mesh.vertices), len(mesh.faces),
-              type(mesh.visual).__name__ if hasattr(mesh, 'visual') else 'none')
     parent_indices = data.get("parent_indices")
 
-    # Restore original visual (textures/materials) before export
-    original_visual = data.get("original_visual")
-    if original_visual is not None:
-        mesh.visual = original_visual
-        log.debug("Restored original visual: %s", type(original_visual).__name__)
+    if mesh_path:
+        mesh_path = str(mesh_path)
+        log.debug("Using pre-serialized temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
     else:
-        log.warning("No original_visual to restore")
+        log.debug("Mesh to export: %d verts, %d faces, visual=%s",
+                  len(mesh.vertices), len(mesh.faces),
+                  type(mesh.visual).__name__ if hasattr(mesh, 'visual') else 'none')
 
-    # Export processed mesh to temp GLB for import into Blender
-    temp_mesh_file = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-    mesh_path = temp_mesh_file.name
-    temp_mesh_file.close()
+        # Restore original visual (textures/materials) before export
+        original_visual = data.get("original_visual")
+        if original_visual is not None:
+            mesh.visual = original_visual
+            log.debug("Restored original visual: %s", type(original_visual).__name__)
+        else:
+            log.warning("No original_visual to restore")
 
-    mesh.export(mesh_path)
-    log.debug("Exported temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
+        # Export processed mesh to temp GLB for import into Blender
+        temp_mesh_file = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
+        mesh_path = temp_mesh_file.name
+        temp_mesh_file.close()
+
+        mesh.export(mesh_path)
+        log.debug("Exported temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
 
     try:
         log.debug("Weights: %s, Joints: %s, Bones: %d", bw.shape, joints.shape, len(bones_idx_dict))
@@ -856,14 +862,84 @@ def _export_mia_fbx(
     if not template_path.exists():
         raise FileNotFoundError(f"No Mixamo template found. Expected at: {template_path}")
 
-    if not _check_bpy_available():
-        raise RuntimeError(
-            "bpy is not available. MIA FBX export requires bpy.\n"
-            "Ensure you are running in the unirig isolated environment."
-        )
+    import subprocess
+    import sys
+    import tempfile
+    import numpy as np
 
-    log.info("Exporting rigged asset via bpy: %s", output_path)
-    _export_mia_fbx_direct(data, output_path, remove_fingers, reset_to_rest, template_path, embed_textures=embed_textures)
+    worker_path = UTILS_DIR / "mia_blender_worker.py"
+    if not worker_path.exists():
+        raise FileNotFoundError(f"MIA Blender worker not found: {worker_path}")
+
+    # Serialize the mesh to a temp GLB in the ComfyUI process before pickling.
+    # trimesh visual/material objects can contain unpickleable mappingproxy values,
+    # while the MIA arrays/dicts pickle cleanly.
+    temp_mesh_path = None
+    mesh = data.get("mesh")
+    if mesh is not None:
+        original_visual = data.get("original_visual")
+        if original_visual is not None:
+            mesh.visual = original_visual
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as mesh_file:
+            temp_mesh_path = mesh_file.name
+        mesh.export(temp_mesh_path)
+
+    bones_idx_dict = dict(data.get("bones_idx_dict", {}))
+    parent_indices = list(data.get("parent_indices", []))
+    joints_tail = data.get("joints_tail")
+    pose = data.get("pose")
+
+    with tempfile.NamedTemporaryFile(suffix=".mia-export.npz", delete=False) as f:
+        payload_path = f.name
+    np.savez_compressed(
+        payload_path,
+        mesh_path=np.array(temp_mesh_path or ""),
+        joints=np.asarray(data["joints"]),
+        joints_tail=np.asarray(joints_tail) if joints_tail is not None else np.empty((0,), dtype=np.float32),
+        has_joints_tail=np.array(joints_tail is not None),
+        bw=np.asarray(data["bw"]),
+        pose=np.asarray(pose) if pose is not None else np.empty((0,), dtype=np.float32),
+        has_pose=np.array(pose is not None),
+        bone_names=np.asarray(list(bones_idx_dict.keys()), dtype=str),
+        bone_indices=np.asarray(list(bones_idx_dict.values()), dtype=np.int64),
+        parent_indices=np.asarray(parent_indices, dtype=np.int64),
+    )
+
+    try:
+        cmd = [
+            sys.executable,
+            str(worker_path),
+            payload_path,
+            output_path,
+            str(template_path),
+        ]
+        if remove_fingers:
+            cmd.append("--remove-fingers")
+        if reset_to_rest:
+            cmd.append("--reset-to-rest")
+        if embed_textures:
+            cmd.append("--embed-textures")
+
+        log.info("Exporting rigged asset via isolated bpy worker: %s", output_path)
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        if process.stdout:
+            log.info("MIA Blender worker stdout:\n%s", process.stdout.strip())
+        if process.returncode != 0:
+            details = (process.stderr or process.stdout or "Unknown worker failure").strip()
+            raise RuntimeError(
+                "MIA Blender export failed in isolated bpy worker "
+                f"(exit code {process.returncode}): {details}"
+            )
+    finally:
+        try:
+            os.remove(payload_path)
+        except OSError:
+            pass
+        if temp_mesh_path:
+            try:
+                os.remove(temp_mesh_path)
+            except OSError:
+                pass
 
     if not os.path.exists(output_path):
         raise RuntimeError(f"Export completed but output file not created: {output_path}")
