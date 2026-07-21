@@ -46,10 +46,10 @@ class FrequencyPositionalEmbedding(nn.Module):
     ) -> None:
         super().__init__()
         if logspace:
-            frequencies = 2.0 ** torch.arange(num_freqs, dtype=torch.float32)
+            frequencies = 2.0 ** torch.arange(num_freqs, dtype=torch.float32, device="cpu")
         else:
             frequencies = torch.linspace(
-                1.0, 2.0 ** (num_freqs - 1), num_freqs, dtype=torch.float32
+                1.0, 2.0 ** (num_freqs - 1), num_freqs, dtype=torch.float32, device="cpu"
             )
         if include_pi:
             frequencies *= torch.pi

@@ -1,12 +1,22 @@
-# Environment manager (handles isolated environment and CUDA packages)
-comfy-env==0.2.14
-comfy-3d-viewers==0.2.33
-comfy-sparse-attn==0.0.4
-
-trimesh
-
-# Core 3D processing
+comfy-3d-viewers==0.2.44
+trimesh[easy]>=4.0.0
 numpy
 scipy
 libigl
 hf_xet
+av
+psutil
+comfy-aimdo
+comfy-sparse-attn==0.0.9
+transformers
+pytorch-lightning
+timm
+einops
+addict
+omegaconf
+huggingface_hub
+wandb
+fast-simplification
+pyrender
+pccm
+shapely

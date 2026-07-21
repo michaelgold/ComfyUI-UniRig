@@ -1,14 +1,5 @@
 """UniRig Nodes."""
 
-import pathlib
-import comfy_sparse_attn
-from comfy_sparse_attn import setup_link
-_PKG = pathlib.Path(comfy_sparse_attn.__file__).parent
-setup_link(_PKG / "sparse.py",           "sparse.py")
-setup_link(_PKG / "ops_sparse.py",       "ops_sparse.py")
-setup_link(_PKG / "attention_sparse.py", "attention_sparse.py")
-del pathlib, comfy_sparse_attn, setup_link, _PKG
-
 from .mesh_io import UniRigLoadMesh, UniRigSaveMesh
 from .load_model import UniRigLoadModel, MIALoadModel
 from .auto_rig import UniRigAutoRig
@@ -48,11 +39,11 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "UniRigLoadMesh": "UniRig: Load Mesh",
     "UniRigSaveMesh": "UniRig: Save Mesh",
-    "UniRigLoadModel": "UniRig: Load Model",
+    "UniRigLoadModel": "UniRig: (Down)Load Model",
     "UniRigAutoRig": "UniRig: Auto Rig",
     "UniRigExtractSkeletonNew": "UniRig: Extract Skeleton",
     "UniRigApplySkinningMLNew": "UniRig: Apply Skinning ML",
-    "MIALoadModel": "MIA: Load Model",
+    "MIALoadModel": "MIA: (Down)Load Model",
     "MIAAutoRig": "MIA: Auto Rig",
     "UniRigApplyAnimation": "UniRig: Apply Animation",
     "UniRigLoadRiggedMesh": "UniRig: Load Rigged Mesh",

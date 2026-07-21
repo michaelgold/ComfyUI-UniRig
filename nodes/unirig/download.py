@@ -4,21 +4,38 @@ from huggingface_hub import hf_hub_download
 import logging
 
 log = logging.getLogger("unirig")
-# Get models directory from environment or use default
-def _get_models_dir() -> Path:
-    """Get the UniRig models directory."""
-    # Check environment variable first (set by ComfyUI-UniRig)
-    models_dir = os.environ.get('UNIRIG_MODELS_DIR')
-    if models_dir:
-        return Path(models_dir)
 
-    # Fallback: look for ComfyUI models/unirig relative to this file
-    # This file is at: .../ComfyUI-UniRig/nodes/lib/unirig/src/inference/download.py
-    # Models dir is at: .../ComfyUI/models/unirig
-    this_file = Path(__file__).resolve()
-    comfyui_unirig = this_file.parents[5]  # Go up to ComfyUI-UniRig
-    comfyui = comfyui_unirig.parents[1]  # Go up to ComfyUI
-    return comfyui / "models" / "unirig"
+
+def _comfy_tqdm():
+    """tqdm that shows download progress in ComfyUI's UI."""
+    try:
+        import comfy.utils
+        import tqdm as _tqdm_mod
+    except ImportError:
+        return None
+    holder = {"pbar": None, "total": 0, "done": 0}
+    class _T(_tqdm_mod.tqdm):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            if self.total and self.total > 0 and holder["pbar"] is None:
+                holder["total"] = self.total
+                holder["done"] = 0
+                holder["pbar"] = comfy.utils.ProgressBar(self.total)
+        def update(self, n=1):
+            ret = super().update(n)
+            if n and holder["pbar"] and holder["total"] > 0:
+                holder["done"] = min(holder["done"] + n, holder["total"])
+                holder["pbar"].update_absolute(holder["done"], holder["total"])
+            return ret
+    return _T
+
+
+def _get_models_dir() -> Path:
+    """Get the UniRig models directory via ComfyUI's folder_paths."""
+    import folder_paths
+    models_dir = Path(folder_paths.models_dir) / "unirig"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    return models_dir
 
 def download(ckpt_name: str) -> str:
     """Download model checkpoint, returns path to local file."""
@@ -52,6 +69,7 @@ def download(ckpt_name: str) -> str:
             filename=filename,
             local_dir=str(models_dir),
             local_dir_use_symlinks=False,
+            tqdm_class=_comfy_tqdm(),
         )
 
         log.info("Downloaded to: %s", local_path)

@@ -10,6 +10,12 @@ import pickle
 import json
 import folder_paths
 import logging
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -31,7 +37,7 @@ def _get_direct_bone_debug():
     return _direct_bone_debug_module
 
 
-class UniRigLoadRiggedMesh:
+class UniRigLoadRiggedMesh(io.ComfyNode):
     """
     Load a rigged FBX file from disk.
 
@@ -40,24 +46,27 @@ class UniRigLoadRiggedMesh:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def define_schema(cls):
         input_files = cls.get_fbx_files_from_input()
         output_files = cls.get_fbx_files_from_output()
         all_files = sorted(set(input_files + output_files)) or [""]
 
-        return {
-            "required": {
-                "fbx_file": (all_files, {"file_upload": True}),
-            },
-        }
+        return io.Schema(
+            node_id="UniRigLoadRiggedMesh",
+            display_name="UniRig: Load Rigged Mesh",
+            category="unirig",
+            description="Load a rigged FBX file from disk. Loads existing FBX files with rigging/skeleton data.",
+            inputs=[
+                io.Combo.Input("fbx_file", options=all_files),
+            ],
+            outputs=[
+                io.String.Output(display_name="fbx_output_path"),
+                io.String.Output(display_name="info"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("fbx_output_path", "info")
-    FUNCTION = "load"
-    CATEGORY = "unirig"
-
-    @classmethod
-    def get_fbx_files_from_input(cls):
+    @staticmethod
+    def get_fbx_files_from_input():
         """Get list of available FBX files in input folder."""
         fbx_files = []
         input_dir = folder_paths.get_input_directory()
@@ -72,8 +81,8 @@ class UniRigLoadRiggedMesh:
 
         return sorted(fbx_files)
 
-    @classmethod
-    def get_fbx_files_from_output(cls):
+    @staticmethod
+    def get_fbx_files_from_output():
         """Get list of available FBX files in output folder."""
         fbx_files = []
         output_dir = folder_paths.get_output_directory()
@@ -88,7 +97,8 @@ class UniRigLoadRiggedMesh:
 
         return sorted(fbx_files)
 
-    def load(self, fbx_file):
+    @classmethod
+    def execute(cls, fbx_file):
         """Load an FBX file and return its filename in output directory."""
         log.info("Loading FBX file: %s", fbx_file)
 
@@ -122,6 +132,9 @@ class UniRigLoadRiggedMesh:
             output_filename = fbx_file
             final_output_path = output_path
             log.info("Using existing file from output: %s", output_filename)
+
+        # Check for interruption before bpy operations
+        _mm().throw_exception_if_processing_interrupted()
 
         # Extract mesh info using bpy
         mesh_info = {}
@@ -223,10 +236,10 @@ class UniRigLoadRiggedMesh:
         log.info("Loaded successfully")
         log.info("%s", info_string)
 
-        return (final_output_path, info_string)
+        return io.NodeOutput(final_output_path, info_string)
 
 
-class UniRigPreviewRiggedMesh:
+class UniRigPreviewRiggedMesh(io.ComfyNode):
     """
     Preview rigged mesh with interactive FBX viewer.
 
@@ -235,21 +248,22 @@ class UniRigPreviewRiggedMesh:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "fbx_output_path": ("STRING", {
-                    "tooltip": "FBX filename from output directory (from UniRigApplySkinningMLNew or UniRigLoadRiggedMesh)"
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigPreviewRiggedMesh",
+            display_name="UniRig: Preview Rigged Mesh",
+            category="unirig",
+            description="Preview rigged mesh with interactive FBX viewer. Displays the rigged FBX in a Three.js viewer with skeleton visualization.",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("fbx_output_path",
+                    tooltip="FBX filename from output directory (from UniRigApplySkinningMLNew or UniRigLoadRiggedMesh)"),
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    OUTPUT_NODE = True
-    FUNCTION = "preview"
-    CATEGORY = "unirig"
-
-    def preview(self, fbx_output_path):
+    @classmethod
+    def execute(cls, fbx_output_path):
         """Preview the rigged mesh in an interactive FBX viewer."""
         log.info("Preparing preview...")
 
@@ -270,16 +284,14 @@ class UniRigPreviewRiggedMesh:
         log.info("Has skinning: %s", has_skinning)
         log.info("Has skeleton: %s", has_skeleton)
 
-        return {
-            "ui": {
-                "fbx_file": [fbx_output_path],
-                "has_skinning": [bool(has_skinning)],
-                "has_skeleton": [bool(has_skeleton)],
-            }
-        }
+        return io.NodeOutput(ui={
+            "fbx_file": [fbx_output_path],
+            "has_skinning": [bool(has_skinning)],
+            "has_skeleton": [bool(has_skeleton)],
+        })
 
 
-class UniRigExportPosedFBX:
+class UniRigExportPosedFBX(io.ComfyNode):
     """
     Export rigged mesh with custom bone pose to FBX.
 
@@ -288,31 +300,28 @@ class UniRigExportPosedFBX:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "rigged_mesh": ("RIGGED_MESH",),
-                "output_filename": ("STRING", {
-                    "default": "posed_export.fbx",
-                    "tooltip": "Output filename for the posed FBX"
-                }),
-            },
-            "optional": {
-                "bone_transforms_json": ("STRING", {
-                    "default": "{}",
-                    "multiline": True,
-                    "tooltip": "JSON string containing bone transforms (name -> {position, quaternion, scale})"
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigExportPosedFBX",
+            display_name="UniRig: Export Posed FBX",
+            category="unirig",
+            description="Export rigged mesh with custom bone pose to FBX. Takes a rigged mesh and bone transform data, applies the pose, and exports the result.",
+            is_output_node=True,
+            inputs=[
+                io.Custom("RIGGED_MESH").Input("rigged_mesh"),
+                io.String.Input("output_filename", default="posed_export.fbx",
+                                tooltip="Output filename for the posed FBX"),
+                io.String.Input("bone_transforms_json", default="{}", multiline=True,
+                                optional=True,
+                                tooltip="JSON string containing bone transforms (name -> {position, quaternion, scale})"),
+            ],
+            outputs=[
+                io.String.Output(display_name="filepath"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("filepath",)
-    FUNCTION = "export_posed_fbx"
-    CATEGORY = "unirig"
-    OUTPUT_NODE = True
-
-    def export_posed_fbx(self, rigged_mesh, output_filename, bone_transforms_json="{}"):
+    @classmethod
+    def execute(cls, rigged_mesh, output_filename, bone_transforms_json="{}"):
         """Export rigged mesh with custom pose to FBX using bpy directly."""
         log.info("Exporting posed FBX...")
 
@@ -336,6 +345,9 @@ class UniRigExportPosedFBX:
             output_filename = output_filename + '.fbx'
         output_fbx_path = os.path.join(output_dir, output_filename)
 
+        # Check for interruption before export
+        _mm().throw_exception_if_processing_interrupted()
+
         # Use direct bpy export
         try:
             from .lib.direct_export_posed_fbx import export_posed_fbx as direct_export
@@ -351,10 +363,10 @@ class UniRigExportPosedFBX:
 
         log.info("[OK] Successfully exported to: %s", output_fbx_path)
 
-        return (output_fbx_path,)
+        return io.NodeOutput(output_fbx_path)
 
 
-class UniRigViewRigging:
+class UniRigViewRigging(io.ComfyNode):
     """
     View rigging debug information.
 
@@ -363,21 +375,22 @@ class UniRigViewRigging:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "fbx_output_path": ("STRING", {
-                    "tooltip": "FBX filename from output directory"
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigViewRigging",
+            display_name="UniRig: View Rigging",
+            category="unirig",
+            description="View rigging debug information. Displays skeleton bones with names, roll/rotation values, and other debugging information.",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("fbx_output_path",
+                    tooltip="FBX filename from output directory"),
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    OUTPUT_NODE = True
-    FUNCTION = "view_rigging"
-    CATEGORY = "unirig"
-
-    def view_rigging(self, fbx_output_path):
+    @classmethod
+    def execute(cls, fbx_output_path):
         """View rigging debug information for the FBX file."""
         log.debug("Preparing debug view...")
 
@@ -417,15 +430,13 @@ class UniRigViewRigging:
         else:
             viewer_filename = fbx_output_path
 
-        return {
-            "ui": {
-                "fbx_file": [viewer_filename],
-                "bone_debug_data": [json.dumps(bone_debug_data)],
-            }
-        }
+        return io.NodeOutput(ui={
+            "fbx_file": [viewer_filename],
+            "bone_debug_data": [json.dumps(bone_debug_data)],
+        })
 
 
-class UniRigDebugSkeleton:
+class UniRigDebugSkeleton(io.ComfyNode):
     """
     Debug skeleton visualization with bone roll/orientation analysis.
 
@@ -438,21 +449,22 @@ class UniRigDebugSkeleton:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "fbx_path": ("STRING", {
-                    "tooltip": "Path to FBX file (from output directory or absolute path)"
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigDebugSkeleton",
+            display_name="UniRig: Debug Skeleton",
+            category="unirig",
+            description="Debug skeleton visualization with bone roll/orientation analysis. Opens the FBX in an enhanced debug viewer.",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("fbx_path",
+                    tooltip="Path to FBX file (from output directory or absolute path)"),
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    OUTPUT_NODE = True
-    FUNCTION = "debug_skeleton"
-    CATEGORY = "unirig"
-
-    def debug_skeleton(self, fbx_path):
+    @classmethod
+    def execute(cls, fbx_path):
         """Open the FBX in the debug skeleton viewer."""
         log.debug("Preparing debug skeleton view...")
 
@@ -475,14 +487,12 @@ class UniRigDebugSkeleton:
         else:
             viewer_filename = fbx_path
 
-        return {
-            "ui": {
-                "fbx_file": [viewer_filename],
-            }
-        }
+        return io.NodeOutput(ui={
+            "fbx_file": [viewer_filename],
+        })
 
 
-class UniRigCompareSkeletons:
+class UniRigCompareSkeletons(io.ComfyNode):
     """
     Compare two skeletons side-by-side with synced rotation.
 
@@ -493,24 +503,24 @@ class UniRigCompareSkeletons:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "fbx_path_left": ("STRING", {
-                    "tooltip": "Path to left skeleton FBX file (from output directory or absolute path)"
-                }),
-                "fbx_path_right": ("STRING", {
-                    "tooltip": "Path to right skeleton FBX file (from output directory or absolute path)"
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigCompareSkeletons",
+            display_name="UniRig: Compare Skeletons",
+            category="unirig",
+            description="Compare two skeletons side-by-side with synced rotation. Opens two FBX files in a split-view debug viewer.",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("fbx_path_left",
+                    tooltip="Path to left skeleton FBX file (from output directory or absolute path)"),
+                io.String.Input("fbx_path_right",
+                    tooltip="Path to right skeleton FBX file (from output directory or absolute path)"),
+            ],
+            outputs=[],
+        )
 
-    RETURN_TYPES = ()
-    OUTPUT_NODE = True
-    FUNCTION = "compare_skeletons"
-    CATEGORY = "unirig"
-
-    def compare_skeletons(self, fbx_path_left, fbx_path_right):
+    @classmethod
+    def execute(cls, fbx_path_left, fbx_path_right):
         """Open both FBX files in the comparison skeleton viewer."""
         log.info("Preparing skeleton comparison view...")
 
@@ -548,9 +558,7 @@ class UniRigCompareSkeletons:
         else:
             viewer_filename_right = fbx_path_right
 
-        return {
-            "ui": {
-                "fbx_file_left": [viewer_filename_left],
-                "fbx_file_right": [viewer_filename_right],
-            }
-        }
+        return io.NodeOutput(ui={
+            "fbx_file_left": [viewer_filename_left],
+            "fbx_file_right": [viewer_filename_right],
+        })

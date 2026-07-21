@@ -13,6 +13,14 @@ import numpy as np
 import trimesh
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
+import comfy.utils
+
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -147,6 +155,7 @@ def create_wireframe_visualization(mesh: trimesh.Trimesh, width: int, height: in
         edges = edges[indices]
 
     for edge in edges:
+        _mm().throw_exception_if_processing_interrupted()
         v1, v2 = vertices[edge[0]], vertices[edge[1]]
         p1 = to_img_coords(v1[0], v1[1])
         p2 = to_img_coords(v2[0], v2[1])
@@ -252,7 +261,7 @@ def create_comparison_image(user_mesh: trimesh.Trimesh, ref_mesh: trimesh.Trimes
     return np.array(combined)
 
 
-class UniRigOrientationCheck:
+class UniRigOrientationCheck(io.ComfyNode):
     """
     Visual orientation check for mesh before MIA rigging.
 
@@ -261,30 +270,26 @@ class UniRigOrientationCheck:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "mesh": ("TRIMESH", {
-                    "tooltip": "Input mesh to check orientation"
-                }),
-            },
-            "optional": {
-                "max_height": ("INT", {
-                    "default": 512,
-                    "min": 256,
-                    "max": 1024,
-                    "step": 64,
-                    "tooltip": "Maximum height of each mesh render"
-                }),
-            }
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigOrientationCheck",
+            display_name="UniRig: Orientation Check",
+            category="UniRig/Utils",
+            description="Visual orientation check for mesh before MIA rigging. Renders your mesh side-by-side with a reference mesh to verify orientation.",
+            inputs=[
+                io.Custom("TRIMESH").Input("mesh",
+                    tooltip="Input mesh to check orientation"),
+                io.Int.Input("max_height", default=512, min=256, max=1024, step=64,
+                             optional=True,
+                             tooltip="Maximum height of each mesh render"),
+            ],
+            outputs=[
+                io.Image.Output(display_name="comparison"),
+            ],
+        )
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("comparison",)
-    FUNCTION = "check_orientation"
-    CATEGORY = "UniRig/Utils"
-
-    def check_orientation(self, mesh, max_height=512):
+    @classmethod
+    def execute(cls, mesh, max_height=512):
         """
         Render mesh alongside reference for orientation verification.
 
@@ -293,7 +298,7 @@ class UniRigOrientationCheck:
             max_height: Maximum height of rendered images
 
         Returns:
-            tuple: (ComfyUI IMAGE tensor,)
+            io.NodeOutput: (ComfyUI IMAGE tensor,)
         """
         log.info("Checking mesh orientation...")
         log.info(f"Mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
@@ -313,6 +318,9 @@ class UniRigOrientationCheck:
             log.info("[OK] Orientation appears correct (Y-up)")
         else:
             log.warning("[WARNING] %s is tallest, expected Y for Y-up", tallest_axis)
+
+        # Check for interruption before rendering
+        _mm().throw_exception_if_processing_interrupted()
 
         # Load reference mesh
         ref_mesh = load_reference_mesh()
@@ -335,4 +343,4 @@ class UniRigOrientationCheck:
 
         log.info("Done. Output shape: %s", image_tensor.shape)
 
-        return (image_tensor,)
+        return io.NodeOutput(image_tensor)

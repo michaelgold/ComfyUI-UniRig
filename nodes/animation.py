@@ -5,6 +5,14 @@ UniRig Animation Node - Apply animations to rigged meshes
 import os
 import time
 from pathlib import Path
+import comfy.utils
+
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -34,48 +42,41 @@ def _get_direct_animation():
     return _direct_animation_module
 
 
-class UniRigApplyAnimation:
+class UniRigApplyAnimation(io.ComfyNode):
     """
     Apply an animation to a rigged FBX model.
     Supports Mixamo FBX animations and SMPL NPZ animations.
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def define_schema(cls):
         # Get animation files for default (mixamo)
         mixamo_files = cls.get_animation_files("mixamo")
 
-        return {
-            "required": {
-                "model_fbx_path": ("STRING", {
-                    "default": "",
-                    "tooltip": "Path to the rigged model FBX file (from UniRig: Apply Skinning output)"
-                }),
-                "animation_type": (["mixamo", "smpl"], {
-                    "default": "mixamo",
-                    "tooltip": "Animation format: mixamo (FBX) or smpl (NPZ). Refresh node after changing."
-                }),
-                "animation_file": (mixamo_files, {
-                    "default": mixamo_files[0] if mixamo_files else "No animations found",
-                    "tooltip": "Animation file to apply. Add more animations to input/animation_templates/<type>/"
-                }),
-            },
-            "optional": {
-                "output_name": ("STRING", {
-                    "default": "",
-                    "tooltip": "Custom output filename (without extension). If empty, auto-generates name."
-                }),
-            },
-        }
+        return io.Schema(
+            node_id="UniRigApplyAnimation",
+            display_name="UniRig: Apply Animation",
+            category="UniRig/Animation",
+            description="Apply an animation to a rigged FBX model. Supports Mixamo FBX animations and SMPL NPZ animations.",
+            is_output_node=True,
+            inputs=[
+                io.String.Input("model_fbx_path", default="",
+                                tooltip="Path to the rigged model FBX file (from UniRig: Apply Skinning output)"),
+                io.Combo.Input("animation_type", options=["mixamo", "smpl"], default="mixamo",
+                               tooltip="Animation format: mixamo (FBX) or smpl (NPZ). Refresh node after changing."),
+                io.Combo.Input("animation_file", options=mixamo_files,
+                               default=mixamo_files[0] if mixamo_files else "No animations found",
+                               tooltip="Animation file to apply. Add more animations to input/animation_templates/<type>/"),
+                io.String.Input("output_name", default="", optional=True,
+                                tooltip="Custom output filename (without extension). If empty, auto-generates name."),
+            ],
+            outputs=[
+                io.String.Output(display_name="animated_fbx_path"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("animated_fbx_path",)
-    FUNCTION = "apply_animation"
-    CATEGORY = "UniRig/Animation"
-    OUTPUT_NODE = True
-
-    @classmethod
-    def get_animation_files(cls, animation_type):
+    @staticmethod
+    def get_animation_files(animation_type):
         """Get list of animation files for the specified type."""
         animation_files = []
 
@@ -97,8 +98,12 @@ class UniRigApplyAnimation:
         return sorted(animation_files) if animation_files else ["No animations found"]
 
     @classmethod
-    def IS_CHANGED(cls, model_fbx_path, animation_type, animation_file, output_name=""):
+    def fingerprint_inputs(cls, **kwargs):
         """Force re-execution when inputs change."""
+        model_fbx_path = kwargs.get("model_fbx_path", "")
+        animation_type = kwargs.get("animation_type", "mixamo")
+        animation_file = kwargs.get("animation_file", "")
+
         if ANIMATION_TEMPLATES_DIR is None:
             return f"{model_fbx_path}:{animation_type}:{animation_file}"
 
@@ -107,7 +112,8 @@ class UniRigApplyAnimation:
             return f"{model_fbx_path}:{os.path.getmtime(anim_path)}"
         return f"{model_fbx_path}:{animation_type}:{animation_file}"
 
-    def apply_animation(self, model_fbx_path, animation_type, animation_file, output_name=""):
+    @classmethod
+    def execute(cls, model_fbx_path, animation_type, animation_file, output_name=""):
         """Apply animation to rigged model using Blender."""
 
         # Validate inputs
@@ -188,6 +194,9 @@ class UniRigApplyAnimation:
         output_path = os.path.join(output_dir, output_filename)
         log.info("Output: %s", output_path)
 
+        # Check for interruption before heavy animation processing
+        _mm().throw_exception_if_processing_interrupted()
+
         # Run direct animation module
         log.info("Applying animation...")
         start_time = time.time()
@@ -206,7 +215,7 @@ class UniRigApplyAnimation:
             log.info("Animation applied in %.2fs", elapsed)
             log.info("Output: %s", output_path)
 
-            return (output_path,)
+            return io.NodeOutput(output_path)
 
         except RuntimeError as e:
             # Check for skeleton mismatch errors

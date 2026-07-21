@@ -6,10 +6,20 @@ import os
 import subprocess
 import tempfile
 import numpy as np
+try:
+    import bpy
+except ImportError:
+    pass
 import trimesh
 import igl
 from pathlib import Path
 from typing import Tuple, Optional
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # ComfyUI folder paths
 try:
@@ -247,7 +257,7 @@ def save_mesh_file(mesh: trimesh.Trimesh, file_path: str) -> Tuple[bool, str]:
         return False, f"Error saving mesh: {str(e)}"
 
 
-class UniRigLoadMesh:
+class UniRigLoadMesh(io.ComfyNode):
     """
     Load a mesh from ComfyUI input or output folder (OBJ, PLY, STL, OFF, etc.)
     Returns trimesh.Trimesh objects for mesh handling.
@@ -257,7 +267,7 @@ class UniRigLoadMesh:
     SUPPORTED_EXTENSIONS = ['.obj', '.ply', '.stl', '.off', '.gltf', '.glb', '.fbx', '.dae', '.3ds', '.vtp']
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def define_schema(cls):
         # Get list of available mesh files from input folder (default)
         mesh_files = cls.get_mesh_files_from_input()
 
@@ -265,25 +275,24 @@ class UniRigLoadMesh:
         if not mesh_files:
             mesh_files = ["No mesh files found"]
 
-        return {
-            "required": {
-                "source_folder": (["input", "output"], {
-                    "default": "input",
-                    "tooltip": "Source folder to load mesh from (ComfyUI input or output directory)"
-                }),
-                "file_path": (mesh_files, {
-                    "tooltip": "Mesh file to load. Refresh the node after changing source_folder."
-                }),
-            },
-        }
+        return io.Schema(
+            node_id="UniRigLoadMesh",
+            display_name="UniRig: Load Mesh",
+            category="UniRig/IO",
+            description="Load a mesh from ComfyUI input or output folder (OBJ, PLY, STL, OFF, etc.) Returns trimesh.Trimesh objects for mesh handling.",
+            inputs=[
+                io.Combo.Input("source_folder", options=["input", "output"], default="input",
+                               tooltip="Source folder to load mesh from (ComfyUI input or output directory)"),
+                io.Combo.Input("file_path", options=mesh_files,
+                               tooltip="Mesh file to load. Refresh the node after changing source_folder."),
+            ],
+            outputs=[
+                io.Custom("TRIMESH").Output(display_name="mesh"),
+            ],
+        )
 
-    RETURN_TYPES = ("TRIMESH",)
-    RETURN_NAMES = ("mesh",)
-    FUNCTION = "load_mesh"
-    CATEGORY = "UniRig/IO"
-
-    @classmethod
-    def get_mesh_files_from_input(cls):
+    @staticmethod
+    def get_mesh_files_from_input():
         """Get list of available mesh files in input/3d and input folders."""
         mesh_files = []
 
@@ -292,20 +301,20 @@ class UniRigLoadMesh:
             input_3d = os.path.join(COMFYUI_INPUT_FOLDER, "3d")
             if os.path.exists(input_3d):
                 for file in os.listdir(input_3d):
-                    if any(file.lower().endswith(ext) for ext in cls.SUPPORTED_EXTENSIONS):
+                    if any(file.lower().endswith(ext) for ext in UniRigLoadMesh.SUPPORTED_EXTENSIONS):
                         mesh_files.append(f"3d/{file}")
 
             # Then scan input root
             for file in os.listdir(COMFYUI_INPUT_FOLDER):
                 file_path = os.path.join(COMFYUI_INPUT_FOLDER, file)
                 if os.path.isfile(file_path):
-                    if any(file.lower().endswith(ext) for ext in cls.SUPPORTED_EXTENSIONS):
+                    if any(file.lower().endswith(ext) for ext in UniRigLoadMesh.SUPPORTED_EXTENSIONS):
                         mesh_files.append(file)
 
         return sorted(mesh_files)
 
-    @classmethod
-    def get_mesh_files_from_output(cls):
+    @staticmethod
+    def get_mesh_files_from_output():
         """Get list of available mesh files in output folder."""
         mesh_files = []
 
@@ -313,7 +322,7 @@ class UniRigLoadMesh:
             # Scan output folder recursively
             for root, dirs, files in os.walk(COMFYUI_OUTPUT_FOLDER):
                 for file in files:
-                    if any(file.lower().endswith(ext) for ext in cls.SUPPORTED_EXTENSIONS):
+                    if any(file.lower().endswith(ext) for ext in UniRigLoadMesh.SUPPORTED_EXTENSIONS):
                         # Get relative path from output folder
                         full_path = os.path.join(root, file)
                         rel_path = os.path.relpath(full_path, COMFYUI_OUTPUT_FOLDER)
@@ -322,8 +331,11 @@ class UniRigLoadMesh:
         return sorted(mesh_files)
 
     @classmethod
-    def IS_CHANGED(cls, source_folder, file_path):
+    def fingerprint_inputs(cls, **kwargs):
         """Force re-execution when file changes."""
+        source_folder = kwargs.get("source_folder", "input")
+        file_path = kwargs.get("file_path", "")
+
         base_folder = COMFYUI_INPUT_FOLDER if source_folder == "input" else COMFYUI_OUTPUT_FOLDER
 
         if base_folder is not None:
@@ -344,7 +356,8 @@ class UniRigLoadMesh:
 
         return f"{source_folder}:{file_path}"
 
-    def load_mesh(self, source_folder, file_path):
+    @classmethod
+    def execute(cls, source_folder, file_path):
         """
         Load mesh from file.
 
@@ -355,7 +368,7 @@ class UniRigLoadMesh:
             file_path: Path to mesh file (relative to source folder or absolute)
 
         Returns:
-            tuple: (trimesh.Trimesh,)
+            io.NodeOutput: (trimesh.Trimesh,)
         """
         if not file_path or file_path.strip() == "":
             raise ValueError("File path cannot be empty")
@@ -400,6 +413,9 @@ class UniRigLoadMesh:
                     error_msg += f"\n  - {path}"
                 raise ValueError(error_msg)
 
+        # Check for interruption before loading mesh
+        _mm().throw_exception_if_processing_interrupted()
+
         # Load the mesh
         loaded_mesh, error = load_mesh_file(full_path)
 
@@ -408,34 +424,34 @@ class UniRigLoadMesh:
 
         log.info(f"Loaded: {len(loaded_mesh.vertices)} vertices, {len(loaded_mesh.faces)} faces")
 
-        return (loaded_mesh,)
+        return io.NodeOutput(loaded_mesh)
 
 
-class UniRigSaveMesh:
+class UniRigSaveMesh(io.ComfyNode):
     """
     Save a mesh to file (OBJ, PLY, STL, OFF, etc.)
     Supports all formats provided by trimesh.
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "trimesh": ("TRIMESH",),
-                "file_path": ("STRING", {
-                    "default": "output.obj",
-                    "multiline": False
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigSaveMesh",
+            display_name="UniRig: Save Mesh",
+            category="UniRig/IO",
+            description="Save a mesh to file (OBJ, PLY, STL, OFF, etc.) Supports all formats provided by trimesh.",
+            is_output_node=True,
+            inputs=[
+                io.Custom("TRIMESH").Input("trimesh"),
+                io.String.Input("file_path", default="output.obj", multiline=False),
+            ],
+            outputs=[
+                io.String.Output(display_name="status"),
+            ],
+        )
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("status",)
-    FUNCTION = "save_mesh"
-    CATEGORY = "UniRig/IO"
-    OUTPUT_NODE = True
-
-    def save_mesh(self, trimesh, file_path):
+    @classmethod
+    def execute(cls, trimesh, file_path):
         """
         Save mesh to file.
 
@@ -446,7 +462,7 @@ class UniRigSaveMesh:
             file_path: Output file path (relative to output folder or absolute)
 
         Returns:
-            tuple: (status_message,)
+            io.NodeOutput: (status_message,)
         """
         if not file_path or file_path.strip() == "":
             raise ValueError("File path cannot be empty")
@@ -492,4 +508,4 @@ class UniRigSaveMesh:
 
         log.info("%s", status)
 
-        return (status,)
+        return io.NodeOutput(status)

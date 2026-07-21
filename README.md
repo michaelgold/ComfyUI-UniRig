@@ -1,4 +1,27 @@
+> [!NOTE]
+> Comfy3D fork: this branch does not use `comfy-env` or pixi. Dependencies are installed directly by the Comfy3D Docker image, including Blender's Python module (`bpy`). This fork also carries Auto-Rig Pro files under `third_party/auto_rig_pro` so UniRig owns its Blender add-on dependency.
+
 # ComfyUI-UniRig
+
+## Installation
+
+Three options, in order of speed → reliability:
+
+1. **ComfyUI Manager (recommended)** — search for `UniRig` in the Manager and click Install from the highest version displayed. If that doesn't work, try nightly.
+2. **Manager via Git URL** — in ComfyUI Manager: "Install via Git URL" with `https://github.com/PozzettiAndrea/ComfyUI-UniRig.git`.
+3. **Manual (most reliable)**:
+   ```bash
+   cd ComfyUI/custom_nodes
+   git clone https://github.com/PozzettiAndrea/ComfyUI-UniRig.git
+   cd ComfyUI-UniRig
+   pip install -r requirements.txt --upgrade
+   python install.py
+   ```
+
+> **Please report any problems** you hit during installation or use of my nodes — open a [Discussion](https://github.com/PozzettiAndrea/ComfyUI-UniRig/discussions) or [Issue](https://github.com/PozzettiAndrea/ComfyUI-UniRig/issues). Very grateful for your help! 🙏
+
+---
+
 
 <div align="center">
 <a href="https://pozzettiandrea.github.io/ComfyUI-UniRig/">
@@ -19,6 +42,8 @@ Rig your character mesh and skin it!
 Change their pose, export a new one
 ![rigging_manipulation](docs/rigging_manipulation.png)
 
+
+
 ## Video demos
 
 
@@ -37,14 +62,6 @@ Manipulation/saving/export:
 
 
 https://github.com/user-attachments/assets/f320db66-4323-4993-a46e-87e2717748ef
-
-## Installation
-
-### Via ComfyUI Manager (Recommended)
-1. Open ComfyUI Manager
-2. Search for "UniRig"
-3. Click Install
-4. Restart ComfyUI
 
 ## Community
 

@@ -1,10 +1,28 @@
-"""ComfyUI-UniRig Prestartup Script."""
+"""ComfyUI-UniRig prestartup for the Comfy3D Docker environment."""
 
 from pathlib import Path
-from comfy_env import setup_env, copy_files
+import shutil
+
 from comfy_3d_viewers import copy_viewer
 
-setup_env()
+
+def copy_files(src, dst, pattern="*", overwrite=False):
+    src = Path(src)
+    dst = Path(dst)
+    if not src.exists():
+        return 0
+    dst.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for file_path in src.glob(pattern):
+        if not file_path.is_file():
+            continue
+        target = dst / file_path.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if overwrite or not target.exists():
+            shutil.copy2(file_path, target)
+            copied += 1
+    return copied
+
 
 SCRIPT_DIR = Path(__file__).parent
 COMFYUI_DIR = SCRIPT_DIR.parent.parent

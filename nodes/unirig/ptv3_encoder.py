@@ -30,7 +30,7 @@ from einops import rearrange
 
 import comfy.ops
 import comfy.utils
-from comfy.attention_sparse import dispatch_varlen_attention
+from comfy_sparse_attn import dispatch_varlen_attention
 
 from .serialization import encode, decode
 
@@ -823,7 +823,7 @@ class PointTransformerV3Object(PointModule):
 
         # encoder
         enc_drop_path = [
-            x.item() for x in torch.linspace(0, drop_path, sum(enc_depths))
+            x.item() for x in torch.linspace(0, drop_path, sum(enc_depths), device="cpu")
         ]
         self.enc = PointSequential()
         for s in range(self.num_stages):

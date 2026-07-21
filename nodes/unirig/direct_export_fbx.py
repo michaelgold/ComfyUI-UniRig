@@ -692,8 +692,10 @@ def _apply_texture(obj, texture_data_base64, material_name):
 
         mat = bpy.data.materials.new(name=material_name)
         mat.use_nodes = True
-        mat.blend_method = 'OPAQUE'
-        mat.shadow_method = 'OPAQUE'
+        # Blender 4.2 removed `shadow_method`; portable shim for
+        # 4.1/4.2/4.3+/5.x lives in _bpy_compat.
+        from ._bpy_compat import set_material_opaque
+        set_material_opaque(mat)
 
         mat.node_tree.nodes.clear()
 

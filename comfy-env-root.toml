@@ -1,6 +1,0 @@
-[apt]
-packages = ["libgl1-mesa-glx", "libglu1-mesa"]
-
-[node_reqs]
-ComfyUI-CameraPack = "PozzettiAndrea/ComfyUI-CameraPack"
-ComfyUI-Env-Manager = "PozzettiAndrea/ComfyUI-Env-Manager"

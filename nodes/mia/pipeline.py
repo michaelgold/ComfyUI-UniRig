@@ -16,6 +16,11 @@ import torch.nn.functional as F
 import trimesh
 
 from .utils import sample_mesh
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 from .dataset_mixamo import MIXAMO_PREFIX
 from . import BONES_IDX_DICT, KINEMATIC_TREE
 
@@ -217,7 +222,7 @@ def prepare_input(
 
 def preprocess(
     data: InferenceData,
-    model_coarse: torch.nn.Module,
+    patcher_coarse,
     device: torch.device,
     dtype: torch.dtype = None,
     hands_resample_ratio: float = 0.5,
@@ -229,7 +234,7 @@ def preprocess(
 
     Args:
         data: InferenceData from prepare_input
-        model_coarse: Coarse joint prediction model
+        patcher_coarse: ModelPatcher for coarse joint prediction model
         device: Torch device
         dtype: Model dtype for input casting (bf16/fp16/fp32)
         hands_resample_ratio: Ratio for hand oversampling
@@ -259,6 +264,8 @@ def preprocess(
     verts = norm.transform_points(verts)
 
     # Run coarse joint localization
+    _mm().load_models_gpu([patcher_coarse])
+    model_coarse = patcher_coarse.model
     with torch.no_grad():
         pts_device = pts.to(device=device)
         joints_out = model_coarse(pts_device).joints.cpu()
@@ -340,10 +347,10 @@ def _chunked_bw(model, pts_device, verts_device, chunk_size=_BW_CHUNK_SIZE):
 
 def infer(
     data: InferenceData,
-    model_bw: torch.nn.Module,
-    model_bw_normal: torch.nn.Module,
-    model_joints: torch.nn.Module,
-    model_pose: torch.nn.Module,
+    patcher_bw,
+    patcher_bw_normal,
+    patcher_joints,
+    patcher_pose,
     device: torch.device,
     dtype: torch.dtype = None,
     use_normal: bool = False,
@@ -353,10 +360,10 @@ def infer(
 
     Args:
         data: Preprocessed InferenceData
-        model_bw: Blend weights model
-        model_bw_normal: Blend weights with normals model
-        model_joints: Joint prediction model
-        model_pose: Pose prediction model
+        patcher_bw: ModelPatcher for blend weights model
+        patcher_bw_normal: ModelPatcher for blend weights with normals model
+        patcher_joints: ModelPatcher for joint prediction model
+        patcher_pose: ModelPatcher for pose prediction model
         device: Torch device
         dtype: Model dtype for input casting (bf16/fp16/fp32)
         use_normal: Whether to use normal-aware blend weights
@@ -391,12 +398,14 @@ def infer(
 
     with torch.no_grad():
         # Blend weights inference
+        _mm().load_models_gpu([patcher_bw])
         pts_device = pts.to(**_to)
         verts_device = verts.to(**_to)
 
-        bw = _chunked_bw(model_bw, pts_device, verts_device)
+        bw = _chunked_bw(patcher_bw.model, pts_device, verts_device)
 
         if use_normal and pts_normal is not None:
+            _mm().load_models_gpu([patcher_bw_normal])
             pts_normal_device = pts_normal.to(**_to)
             verts_normal_device = verts_normal.to(**_to) if verts_normal is not None else None
 
@@ -406,7 +415,7 @@ def infer(
                 if verts_normal_device is not None
                 else verts_device
             )
-            bw_normal = _chunked_bw(model_bw_normal, pts_with_normal, verts_with_normal)
+            bw_normal = _chunked_bw(patcher_bw_normal.model, pts_with_normal, verts_with_normal)
 
             # Blend normal weights for spine/shoulder/arm regions
             mask = get_conflict_mask(
@@ -420,12 +429,14 @@ def infer(
 
         bw = bw.cpu()
 
-        # Joints and pose inference
-        joints_out = model_joints(pts_device).joints.cpu()
+        # Joints inference
+        _mm().load_models_gpu([patcher_joints])
+        joints_out = patcher_joints.model(pts_device).joints.cpu()
 
-        # Prepare joints for pose model
+        # Pose inference
+        _mm().load_models_gpu([patcher_pose])
         joints_for_pose = joints_out.clone().to(**_to)
-        pose = model_pose(pts_device, joints=joints_for_pose).pose_trans.cpu()
+        pose = patcher_pose.model(pts_device, joints=joints_for_pose).pose_trans.cpu()
 
     data.mesh.vertices = verts.squeeze(0).cpu().float().numpy()
     data.pts = pts

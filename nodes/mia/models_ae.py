@@ -168,7 +168,7 @@ class PointEmbed(nn.Module):
     
     def forward(self, input):
         # input: B x N x 3
-        embed = self.mlp(torch.cat([self.embed(input, self.basis), input], dim=2)) # B x N x C
+        embed = self.mlp(torch.cat([self.embed(input, self.basis.to(device=input.device)), input], dim=2)) # B x N x C
         return embed
 
 

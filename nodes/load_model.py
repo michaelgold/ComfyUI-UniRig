@@ -11,6 +11,14 @@ import sys
 from pathlib import Path
 
 import torch
+import comfy.utils
+
+from comfy_api.latest import io
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 log = logging.getLogger("unirig")
 
@@ -27,7 +35,7 @@ except ImportError:
 _MODEL_CACHE = {}
 
 
-class UniRigLoadSkeletonModel:
+class UniRigLoadSkeletonModel(io.ComfyNode):
     """
     Load and cache the UniRig skeleton extraction model.
 
@@ -37,26 +45,25 @@ class UniRigLoadSkeletonModel:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model_id": ("STRING", {
-                    "default": "apozz/UniRig-safetensors",
-                    "tooltip": "HuggingFace model ID for skeleton model"
-                }),
-                "cache_to_gpu": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Keep model cached on GPU for faster inference. Disable to offload to CPU after inference (saves VRAM)."
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigLoadSkeletonModel",
+            display_name="UniRig: (Down)Load Skeleton Model",
+            category="UniRig/Models",
+            description="Load and cache the UniRig skeleton extraction model. Pre-downloads model weights and prepares configuration for faster skeleton inference.",
+            inputs=[
+                io.String.Input("model_id", default="apozz/UniRig-safetensors",
+                                tooltip="HuggingFace model ID for skeleton model"),
+                io.Boolean.Input("cache_to_gpu", default=True,
+                                 tooltip="Keep model cached on GPU for faster inference. Disable to offload to CPU after inference (saves VRAM)."),
+            ],
+            outputs=[
+                io.Custom("UNIRIG_SKELETON_MODEL").Output(display_name="skeleton_model"),
+            ],
+        )
 
-    RETURN_TYPES = ("UNIRIG_SKELETON_MODEL",)
-    RETURN_NAMES = ("skeleton_model",)
-    FUNCTION = "load_model"
-    CATEGORY = "UniRig/Models"
-
-    def load_model(self, model_id="apozz/UniRig-safetensors", cache_to_gpu=True, **kwargs):
+    @classmethod
+    def execute(cls, model_id="apozz/UniRig-safetensors", cache_to_gpu=True, **kwargs):
         """Download and cache skeleton model configuration. No model loading."""
         log.info("Loading skeleton model config: %s", model_id)
 
@@ -66,7 +73,10 @@ class UniRigLoadSkeletonModel:
         if cache_key in _MODEL_CACHE:
             cached_model = _MODEL_CACHE[cache_key]
             log.info("Using cached model configuration")
-            return (cached_model,)
+            return io.NodeOutput(cached_model)
+
+        # Check for interruption before download
+        _mm().throw_exception_if_processing_interrupted()
 
         # Download checkpoint
         try:
@@ -87,7 +97,7 @@ class UniRigLoadSkeletonModel:
 
             _MODEL_CACHE[cache_key] = model_wrapper
             log.info("Skeleton model config cached (checkpoint: %s)", local_checkpoint)
-            return (model_wrapper,)
+            return io.NodeOutput(model_wrapper)
 
         except Exception as e:
             log.error("Error loading model: %s", e, exc_info=True)
@@ -97,10 +107,10 @@ class UniRigLoadSkeletonModel:
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
             }
-            return (model_wrapper,)
+            return io.NodeOutput(model_wrapper)
 
 
-class UniRigLoadSkinningModel:
+class UniRigLoadSkinningModel(io.ComfyNode):
     """
     Load and cache the UniRig skinning weight prediction model.
 
@@ -110,26 +120,25 @@ class UniRigLoadSkinningModel:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "model_id": ("STRING", {
-                    "default": "apozz/UniRig-safetensors",
-                    "tooltip": "HuggingFace model ID for skinning model"
-                }),
-                "cache_to_gpu": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Keep model cached on GPU for faster inference. Disable to offload to CPU after inference (saves VRAM)."
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigLoadSkinningModel",
+            display_name="UniRig: (Down)Load Skinning Model",
+            category="UniRig/Models",
+            description="Load and cache the UniRig skinning weight prediction model. Pre-downloads model weights and prepares configuration for faster skinning inference.",
+            inputs=[
+                io.String.Input("model_id", default="apozz/UniRig-safetensors",
+                                tooltip="HuggingFace model ID for skinning model"),
+                io.Boolean.Input("cache_to_gpu", default=True,
+                                 tooltip="Keep model cached on GPU for faster inference. Disable to offload to CPU after inference (saves VRAM)."),
+            ],
+            outputs=[
+                io.Custom("UNIRIG_SKINNING_MODEL").Output(display_name="skinning_model"),
+            ],
+        )
 
-    RETURN_TYPES = ("UNIRIG_SKINNING_MODEL",)
-    RETURN_NAMES = ("skinning_model",)
-    FUNCTION = "load_model"
-    CATEGORY = "UniRig/Models"
-
-    def load_model(self, model_id="apozz/UniRig-safetensors", cache_to_gpu=True, **kwargs):
+    @classmethod
+    def execute(cls, model_id="apozz/UniRig-safetensors", cache_to_gpu=True, **kwargs):
         """Download and cache skinning model configuration. No model loading."""
         log.info("Loading skinning model config: %s", model_id)
 
@@ -139,7 +148,10 @@ class UniRigLoadSkinningModel:
         if cache_key in _MODEL_CACHE:
             cached_model = _MODEL_CACHE[cache_key]
             log.info("Using cached model configuration")
-            return (cached_model,)
+            return io.NodeOutput(cached_model)
+
+        # Check for interruption before download
+        _mm().throw_exception_if_processing_interrupted()
 
         # Download checkpoint
         try:
@@ -160,7 +172,7 @@ class UniRigLoadSkinningModel:
 
             _MODEL_CACHE[cache_key] = model_wrapper
             log.info("Skinning model config cached (checkpoint: %s)", local_checkpoint)
-            return (model_wrapper,)
+            return io.NodeOutput(model_wrapper)
 
         except Exception as e:
             log.error("Error loading model: %s", e, exc_info=True)
@@ -170,10 +182,10 @@ class UniRigLoadSkinningModel:
                 "unirig_path": UNIRIG_PATH,
                 "models_dir": str(UNIRIG_MODELS_DIR),
             }
-            return (model_wrapper,)
+            return io.NodeOutput(model_wrapper)
 
 
-class UniRigLoadModel:
+class UniRigLoadModel(io.ComfyNode):
     """Load UniRig model configuration for the rigging pipeline.
 
     Downloads checkpoints and resolves precision/attention settings.
@@ -181,27 +193,27 @@ class UniRigLoadModel:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {},
-            "optional": {
-                "precision": (["auto", "bf16", "fp16", "fp32"], {
-                    "default": "auto",
-                    "tooltip": "Model precision. auto: best for your GPU (bf16 on Ampere+, fp16 on Volta/Turing, fp32 on older)."
-                }),
-                "attn_backend": (ATTN_BACKENDS, {
-                    "default": "auto",
-                    "tooltip": "Attention backend. auto: best available (flash_attn > sdpa). flash_attn requires flash-attn package."
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="UniRigLoadModel",
+            display_name="UniRig: (Down)Load Model",
+            category="UniRig",
+            description="Load UniRig model configuration for the rigging pipeline. Downloads checkpoints and resolves precision/attention settings.",
+            inputs=[
+                io.Combo.Input("precision", options=["auto", "bf16", "fp16", "fp32"],
+                               default="auto", optional=True,
+                               tooltip="Model precision. auto: best for your GPU (bf16 on Ampere+, fp16 on Volta/Turing, fp32 on older)."),
+                io.Combo.Input("attn_backend", options=ATTN_BACKENDS,
+                               default="auto", optional=True,
+                               tooltip="Attention backend. auto: best available (flash_attn > sdpa). flash_attn requires flash-attn package."),
+            ],
+            outputs=[
+                io.Custom("UNIRIG_MODEL").Output(display_name="model"),
+            ],
+        )
 
-    RETURN_TYPES = ("UNIRIG_MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "load_models"
-    CATEGORY = "UniRig"
-
-    def load_models(self, precision="auto", attn_backend="auto", **kwargs):
+    @classmethod
+    def execute(cls, precision="auto", attn_backend="auto", **kwargs):
         """Download checkpoints and resolve precision/attention config."""
         import comfy.model_management as mm
         # Resolve precision
@@ -222,13 +234,14 @@ class UniRigLoadModel:
         model_id = "apozz/UniRig-safetensors"
 
         # Download skeleton checkpoint
-        skeleton_loader = UniRigLoadSkeletonModel()
-        skeleton_result = skeleton_loader.load_model(model_id=model_id)
+        skeleton_result = UniRigLoadSkeletonModel.execute(model_id=model_id)
         skeleton_model = skeleton_result[0]
 
+        # Check for interruption between downloads
+        _mm().throw_exception_if_processing_interrupted()
+
         # Download skinning checkpoint
-        skinning_loader = UniRigLoadSkinningModel()
-        skinning_result = skinning_loader.load_model(model_id=model_id)
+        skinning_result = UniRigLoadSkinningModel.execute(model_id=model_id)
         skinning_model = skinning_result[0]
 
         # Propagate dtype and attn_backend into sub-model dicts
@@ -247,7 +260,7 @@ class UniRigLoadModel:
         }
 
         log.info("UniRig model config ready")
-        return (combined_model,)
+        return io.NodeOutput(combined_model)
 
 
 def clear_model_cache():
@@ -264,7 +277,7 @@ def get_cached_models():
     return list(_MODEL_CACHE.keys())
 
 
-class MIALoadModel:
+class MIALoadModel(io.ComfyNode):
     """
     Load Make-It-Animatable models for fast humanoid rigging.
 
@@ -275,27 +288,27 @@ class MIALoadModel:
     """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {},
-            "optional": {
-                "precision": (["auto", "bf16", "fp16", "fp32"], {
-                    "default": "auto",
-                    "tooltip": "Model precision. auto: best for your GPU (bf16 on Ampere+, fp16 on Volta/Turing, fp32 on older)."
-                }),
-                "attn_backend": (ATTN_BACKENDS, {
-                    "default": "auto",
-                    "tooltip": "Attention backend. auto: best available (flash_attn > sdpa). flash_attn requires flash-attn package."
-                }),
-            },
-        }
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MIALoadModel",
+            display_name="MIA: (Down)Load Model",
+            category="UniRig/MIA",
+            description="Load Make-It-Animatable models for fast humanoid rigging. Downloads models from HuggingFace on first use. Faster than UniRig but only supports humanoid characters with Mixamo skeleton.",
+            inputs=[
+                io.Combo.Input("precision", options=["auto", "bf16", "fp16", "fp32"],
+                               default="auto", optional=True,
+                               tooltip="Model precision. auto: best for your GPU (bf16 on Ampere+, fp16 on Volta/Turing, fp32 on older)."),
+                io.Combo.Input("attn_backend", options=ATTN_BACKENDS,
+                               default="auto", optional=True,
+                               tooltip="Attention backend. auto: best available (flash_attn > sdpa). flash_attn requires flash-attn package."),
+            ],
+            outputs=[
+                io.Custom("MIA_MODEL").Output(display_name="model"),
+            ],
+        )
 
-    RETURN_TYPES = ("MIA_MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "load_models"
-    CATEGORY = "UniRig/MIA"
-
-    def load_models(self, precision="auto", attn_backend="auto"):
+    @classmethod
+    def execute(cls, precision="auto", attn_backend="auto"):
         """Return MIA config with resolved precision."""
         import comfy.model_management as mm
         device = mm.get_torch_device()
@@ -310,8 +323,8 @@ class MIALoadModel:
             dtype = precision
 
         log.info("MIA config: precision=%s -> %s, attn_backend=%s", precision, dtype, attn_backend)
-        return ({
+        return io.NodeOutput({
             "backend": "mia",
             "dtype": dtype,
             "attn_backend": attn_backend,
-        },)
+        })

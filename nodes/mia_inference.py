@@ -13,9 +13,38 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 import logging
-import comfy.model_management
+import comfy.utils
 
 log = logging.getLogger("unirig")
+
+
+def _comfy_tqdm():
+    """tqdm that shows download progress in ComfyUI's UI."""
+    try:
+        import comfy.utils
+        import tqdm as _tqdm_mod
+    except ImportError:
+        return None
+    holder = {"pbar": None, "total": 0, "done": 0}
+    class _T(_tqdm_mod.tqdm):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            if self.total and self.total > 0 and holder["pbar"] is None:
+                holder["total"] = self.total
+                holder["done"] = 0
+                holder["pbar"] = comfy.utils.ProgressBar(self.total)
+        def update(self, n=1):
+            ret = super().update(n)
+            if n and holder["pbar"] and holder["total"] > 0:
+                holder["done"] = min(holder["done"] + n, holder["total"])
+                holder["pbar"].update_absolute(holder["done"], holder["total"])
+            return ret
+    return _T
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 # Type hints only - not imported at runtime
 if TYPE_CHECKING:
     import numpy as np
@@ -90,6 +119,7 @@ def ensure_mia_models() -> bool:
         MIA_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         for model_file in missing:
+            _mm().throw_exception_if_processing_interrupted()
             log.info("Downloading %s...", model_file)
             target_path = MIA_MODELS_DIR / model_file
             with tempfile.TemporaryDirectory(dir=str(MIA_MODELS_DIR)) as tmp_dir:
@@ -98,6 +128,7 @@ def ensure_mia_models() -> bool:
                     filename=f"output/best/new/{model_file}",
                     local_dir=tmp_dir,
                     local_dir_use_symlinks=False,
+                    tqdm_class=_comfy_tqdm(),
                 )
                 downloaded = Path(tmp_dir) / "output" / "best" / "new" / model_file
                 downloaded.rename(target_path)
@@ -140,7 +171,7 @@ def load_mia_models(dtype: str = "fp32") -> str:
     if not ensure_mia_models():
         raise RuntimeError("Failed to download MIA models")
 
-    load_device = comfy.model_management.get_torch_device()
+    load_device = _mm().get_torch_device()
     offload_device = torch.device("cpu")
     torch_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}.get(dtype, torch.float32)
     log.info("Loading MIA models (dtype=%s, load_device=%s, offload_device=%s)...", torch_dtype, load_device, offload_device)
@@ -232,6 +263,8 @@ def run_mia_inference(
     no_fingers: bool = True,
     use_normal: bool = False,
     reset_to_rest: bool = True,
+    target_face_count: int | None = 50000,
+    embed_textures: bool = True,
 ) -> str:
     """
     Run Make-It-Animatable inference on a mesh.
@@ -255,22 +288,40 @@ def run_mia_inference(
     from .mia import BONES_IDX_DICT, KINEMATIC_TREE
 
     N = models["N"]
-
-    # Let ComfyUI manage GPU memory for all models
-    patchers = [
-        models["patcher_coarse"],
-        models["patcher_bw"],
-        models["patcher_bw_normal"],
-        models["patcher_joints"],
-        models["patcher_pose"],
-    ]
-    comfy.model_management.load_models_gpu(patchers)
-    device = patchers[0].load_device
+    device = models["patcher_coarse"].load_device
     dtype = models["dtype"]
 
     log.info("Starting MIA inference (device=%s, dtype=%s)...", device, dtype)
-    log.info("Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s", no_fingers, use_normal, reset_to_rest)
+    log.info(
+        "Options: no_fingers=%s, use_normal=%s, reset_to_rest=%s, target_face_count=%s, embed_textures=%s",
+        no_fingers,
+        use_normal,
+        reset_to_rest,
+        target_face_count,
+        embed_textures,
+    )
     log.info("Input mesh: %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
+
+    if target_face_count is not None and target_face_count > 0 and len(mesh.faces) > target_face_count:
+        log.info("Simplifying MIA input mesh from %d faces to target %d faces...", len(mesh.faces), target_face_count)
+        simplify = getattr(mesh, "simplify_quadric_decimation", None)
+        if simplify is None:
+            simplify = getattr(mesh, "simplify_quadratic_decimation", None)
+        if simplify is None:
+            log.warning("trimesh simplification is unavailable; continuing with %d faces", len(mesh.faces))
+        else:
+            try:
+                simplified = simplify(face_count=int(target_face_count))
+            except TypeError:
+                simplified = simplify(int(target_face_count))
+            if simplified is not None and hasattr(simplified, "faces") and len(simplified.faces) > 0:
+                mesh = simplified
+                log.info("Simplified MIA input mesh to %d vertices, %d faces", len(mesh.vertices), len(mesh.faces))
+            else:
+                log.warning("trimesh simplification returned no usable mesh; continuing with %d faces", len(mesh.faces))
+
+    # Progress bar for the 4-step MIA inference pipeline + export
+    pbar = comfy.utils.ProgressBar(5)
 
     # Prepare input
     log.info("Step 1/4: Preparing input (N=%d)...", N)
@@ -281,31 +332,43 @@ def run_mia_inference(
         geo_resample_ratio=models["geo_resample_ratio"],
         get_normals=use_normal,
     )
+    pbar.update(1)
+
+    # Check for interruption before preprocessing
+    _mm().throw_exception_if_processing_interrupted()
 
     # Preprocess (normalize, coarse joint localization)
     log.info("Step 2/4: Preprocessing (model_coarse, dtype=%s)...", dtype)
     data = preprocess(
         data,
-        model_coarse=models["patcher_coarse"].model,
+        patcher_coarse=models["patcher_coarse"],
         device=device,
         dtype=dtype,
         hands_resample_ratio=models["hands_resample_ratio"],
         geo_resample_ratio=models["geo_resample_ratio"],
         N=N,
     )
+    pbar.update(1)
 
-    # Run main inference
+    # Check for interruption before main inference
+    _mm().throw_exception_if_processing_interrupted()
+
+    # Run main inference (models loaded to GPU individually inside infer())
     log.info("Step 3/4: Running inference (model_bw, model_joints, model_pose, dtype=%s)...", dtype)
     data = infer(
         data,
-        model_bw=models["patcher_bw"].model,
-        model_bw_normal=models["patcher_bw_normal"].model,
-        model_joints=models["patcher_joints"].model,
-        model_pose=models["patcher_pose"].model,
+        patcher_bw=models["patcher_bw"],
+        patcher_bw_normal=models["patcher_bw_normal"],
+        patcher_joints=models["patcher_joints"],
+        patcher_pose=models["patcher_pose"],
         device=device,
         dtype=dtype,
         use_normal=use_normal,
     )
+    pbar.update(1)
+
+    # Check for interruption before post-processing
+    _mm().throw_exception_if_processing_interrupted()
 
     # Post-process blend weights
     log.info("Step 4/4: Post-processing blend weights...")
@@ -327,7 +390,9 @@ def run_mia_inference(
     log.info("reset_to_rest=%s, data.pose is None: %s", reset_to_rest, data.pose is None)
     if data.pose is not None:
         log.info("Pose shape: %s", data.pose.shape)
-        pose_debug_path = os.path.join(folder_paths.get_temp_directory(), "mia_pose_debug.npy")
+        temp_dir = folder_paths.get_temp_directory()
+        os.makedirs(temp_dir, exist_ok=True)
+        pose_debug_path = os.path.join(temp_dir, "mia_pose_debug.npy")
         np.save(pose_debug_path, data.pose.squeeze(0).float().numpy())
         log.debug("Saved pose data to %s", pose_debug_path)
 
@@ -339,15 +404,21 @@ def run_mia_inference(
         "joints_tail": joints_np[..., 3:] if joints_np.shape[-1] > 3 else None,
         "bw": bw.squeeze(0).float().numpy(),
         "pose": data.pose.squeeze(0).float().numpy() if reset_to_rest and data.pose is not None else None,
-        "bones_idx_dict": BONES_IDX_DICT,
-        "parent_indices": KINEMATIC_TREE.parent_indices,
+        "bones_idx_dict": dict(BONES_IDX_DICT),
+        "parent_indices": list(KINEMATIC_TREE.parent_indices),
         "pose_ignore_list": [],
     }
 
+    pbar.update(1)
+
+    # Check for interruption before FBX export
+    _mm().throw_exception_if_processing_interrupted()
+
     # Export to FBX using MIA's Blender integration
     log.info("Exporting to FBX...")
-    _export_mia_fbx(output_data, output_path, no_fingers, reset_to_rest)
+    _export_mia_fbx(output_data, output_path, no_fingers, reset_to_rest, embed_textures=embed_textures)
 
+    pbar.update(1)
     log.info("Inference complete: %s", output_path)
     return output_path
 
@@ -358,6 +429,7 @@ def _export_mia_fbx_direct(
     remove_fingers: bool,
     reset_to_rest: bool,
     template_path: Path,
+    embed_textures: bool = True,
 ) -> None:
     """
     Export MIA results to FBX using bpy directly (inlined, no imports needed).
@@ -367,33 +439,39 @@ def _export_mia_fbx_direct(
     import bpy  # Lazy import - only imported here AFTER torch_cluster loaded
     from mathutils import Vector, Matrix
 
-    mesh = data["mesh"]
+    mesh = data.get("mesh")
+    mesh_path = data.get("mesh_path")
     joints = data["joints"]
     joints_tail = data.get("joints_tail")
     bw = data["bw"]
     pose = data.get("pose")
     bones_idx_dict = dict(data["bones_idx_dict"])
 
-    log.debug("Mesh to export: %d verts, %d faces, visual=%s",
-              len(mesh.vertices), len(mesh.faces),
-              type(mesh.visual).__name__ if hasattr(mesh, 'visual') else 'none')
     parent_indices = data.get("parent_indices")
 
-    # Restore original visual (textures/materials) before export
-    original_visual = data.get("original_visual")
-    if original_visual is not None:
-        mesh.visual = original_visual
-        log.debug("Restored original visual: %s", type(original_visual).__name__)
+    if mesh_path:
+        mesh_path = str(mesh_path)
+        log.debug("Using pre-serialized temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
     else:
-        log.warning("No original_visual to restore")
+        log.debug("Mesh to export: %d verts, %d faces, visual=%s",
+                  len(mesh.vertices), len(mesh.faces),
+                  type(mesh.visual).__name__ if hasattr(mesh, 'visual') else 'none')
 
-    # Export processed mesh to temp GLB for import into Blender
-    temp_mesh_file = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
-    mesh_path = temp_mesh_file.name
-    temp_mesh_file.close()
+        # Restore original visual (textures/materials) before export
+        original_visual = data.get("original_visual")
+        if original_visual is not None:
+            mesh.visual = original_visual
+            log.debug("Restored original visual: %s", type(original_visual).__name__)
+        else:
+            log.warning("No original_visual to restore")
 
-    mesh.export(mesh_path)
-    log.debug("Exported temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
+        # Export processed mesh to temp GLB for import into Blender
+        temp_mesh_file = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
+        mesh_path = temp_mesh_file.name
+        temp_mesh_file.close()
+
+        mesh.export(mesh_path)
+        log.debug("Exported temp GLB: %s (%d bytes)", mesh_path, os.path.getsize(mesh_path))
 
     try:
         log.debug("Weights: %s, Joints: %s, Bones: %d", bw.shape, joints.shape, len(bones_idx_dict))
@@ -534,6 +612,7 @@ def _export_mia_fbx_direct(
         weights_list = np.split(bw, np.cumsum(vertices_num)[:-1])
 
         for mesh_obj, mesh_bw in zip(input_meshes, weights_list):
+            _mm().throw_exception_if_processing_interrupted()
             mesh_data = mesh_obj.data
             mesh_obj.vertex_groups.clear()
             for bone_name, bone_index in bones_idx_dict.items():
@@ -559,32 +638,65 @@ def _export_mia_fbx_direct(
             log.info("Applying pose-to-rest transformation...")
             _apply_pose_to_rest_inline(armature, pose, bones_idx_dict, parent_indices, input_meshes, joints_normalized, template_bone_data)
 
-        # Fix image filepaths and pack for FBX embedding
-        # FBX exporter needs proper filepaths with filenames, not just directories
-        log.debug("Fixing image filepaths for FBX export...")
-        fbm_dir = output_path.rsplit('.', 1)[0] + '.fbm'
-        os.makedirs(fbm_dir, exist_ok=True)
+        # Export directly to GLB when requested. This avoids Blender's FBX exporter,
+        # which can segfault in headless CUDA CI even after MIA inference succeeds.
+        if output_path.lower().endswith(".glb"):
+            # Match the old FBX->GLB path's transform baking. The Mixamo
+            # template imports with an object-level 0.01 armature scale; if that
+            # scale is left on the glTF armature root, some consumers display
+            # child bones ~100x too large. Bake object transforms into the mesh
+            # and armature data before direct GLB export.
+            bpy.ops.object.mode_set(mode='OBJECT') if bpy.ops.object.mode_set.poll() else None
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in [armature, *input_meshes]:
+                obj.select_set(True)
+            bpy.context.view_layer.objects.active = armature
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.update()
 
-        for img in bpy.data.images:
-            if img.size[0] > 0 and img.size[1] > 0:  # Valid image
-                # Create a proper filepath with filename
-                img_filename = f"{img.name}.png"
-                img_filepath = os.path.join(fbm_dir, img_filename)
+            export_result = bpy.ops.export_scene.gltf(
+                filepath=output_path,
+                export_format='GLB',
+                export_texcoords=True,
+                export_normals=True,
+                export_materials='EXPORT',
+                export_image_format='AUTO',
+                check_existing=False,
+            )
+            if "FINISHED" not in export_result:
+                raise RuntimeError(f"Failed to export GLB: {output_path}")
+            log.info("Exported rigged GLB to: %s", output_path)
+            return
 
-                # Save the image to disk first (FBX exporter needs this)
-                old_filepath = img.filepath
-                img.filepath_raw = img_filepath
-                img.file_format = 'PNG'
-                img.save()
-                log.debug("Saved texture: %s", img_filepath)
+        if embed_textures:
+            # Fix image filepaths and pack for FBX embedding.
+            # FBX exporter needs proper filepaths with filenames, not just directories.
+            log.debug("Fixing image filepaths for FBX export...")
+            fbm_dir = output_path.rsplit('.', 1)[0] + '.fbm'
+            os.makedirs(fbm_dir, exist_ok=True)
 
-                # Now pack it
-                if img.packed_file is None:
-                    try:
-                        img.pack()
-                        log.debug("Packed: %s", img.name)
-                    except Exception as e:
-                        log.debug("Failed to pack %s: %s", img.name, e)
+            for img in bpy.data.images:
+                if img.size[0] > 0 and img.size[1] > 0:  # Valid image
+                    # Create a proper filepath with filename
+                    img_filename = f"{img.name}.png"
+                    img_filepath = os.path.join(fbm_dir, img_filename)
+
+                    # Save the image to disk first (FBX exporter needs this)
+                    img.filepath_raw = img_filepath
+                    img.file_format = 'PNG'
+                    img.save()
+                    log.debug("Saved texture: %s", img_filepath)
+
+                    # Now pack it
+                    if img.packed_file is None:
+                        try:
+                            img.pack()
+                            log.debug("Packed: %s", img.name)
+                        except Exception as e:
+                            log.debug("Failed to pack %s: %s", img.name, e)
+        else:
+            log.info("Skipping FBX texture embedding for stable headless export")
 
         # Export FBX
         bpy.context.view_layer.update()
@@ -594,8 +706,8 @@ def _export_mia_fbx_direct(
             object_types={'ARMATURE', 'MESH'},
             add_leaf_bones=False,
             bake_anim=False,
-            path_mode='COPY',
-            embed_textures=True,
+            path_mode='COPY' if embed_textures else 'AUTO',
+            embed_textures=embed_textures,
         )
         log.info("Exported to: %s", output_path)
 
@@ -654,6 +766,7 @@ def _apply_pose_to_rest_inline(armature_obj, pose, bones_idx_dict, parent_indice
     # Propagate through kinematic chain
     posed_joints = joints.copy()
     for i in range(1, K):
+        _mm().throw_exception_if_processing_interrupted()
         parent_idx = parent_indices[i]
         parent_matrix = pose_global[parent_idx]
         posed_joints[i] = parent_matrix[:3, :3] @ joints[i] + parent_matrix[:3, 3]
@@ -748,6 +861,7 @@ def _export_mia_fbx(
     output_path: str,
     remove_fingers: bool,
     reset_to_rest: bool,
+    embed_textures: bool = True,
 ) -> None:
     """
     Export MIA results to FBX using bpy directly.
@@ -761,14 +875,84 @@ def _export_mia_fbx(
     if not template_path.exists():
         raise FileNotFoundError(f"No Mixamo template found. Expected at: {template_path}")
 
-    if not _check_bpy_available():
-        raise RuntimeError(
-            "bpy is not available. MIA FBX export requires bpy.\n"
-            "Ensure you are running in the unirig isolated environment."
-        )
+    import subprocess
+    import sys
+    import tempfile
+    import numpy as np
 
-    log.info("Exporting FBX via bpy...")
-    _export_mia_fbx_direct(data, output_path, remove_fingers, reset_to_rest, template_path)
+    worker_path = UTILS_DIR / "mia_blender_worker.py"
+    if not worker_path.exists():
+        raise FileNotFoundError(f"MIA Blender worker not found: {worker_path}")
+
+    # Serialize the mesh to a temp GLB in the ComfyUI process before pickling.
+    # trimesh visual/material objects can contain unpickleable mappingproxy values,
+    # while the MIA arrays/dicts pickle cleanly.
+    temp_mesh_path = None
+    mesh = data.get("mesh")
+    if mesh is not None:
+        original_visual = data.get("original_visual")
+        if original_visual is not None:
+            mesh.visual = original_visual
+        with tempfile.NamedTemporaryFile(suffix=".glb", delete=False) as mesh_file:
+            temp_mesh_path = mesh_file.name
+        mesh.export(temp_mesh_path)
+
+    bones_idx_dict = dict(data.get("bones_idx_dict", {}))
+    parent_indices = list(data.get("parent_indices", []))
+    joints_tail = data.get("joints_tail")
+    pose = data.get("pose")
+
+    with tempfile.NamedTemporaryFile(suffix=".mia-export.npz", delete=False) as f:
+        payload_path = f.name
+    np.savez_compressed(
+        payload_path,
+        mesh_path=np.array(temp_mesh_path or ""),
+        joints=np.asarray(data["joints"]),
+        joints_tail=np.asarray(joints_tail) if joints_tail is not None else np.empty((0,), dtype=np.float32),
+        has_joints_tail=np.array(joints_tail is not None),
+        bw=np.asarray(data["bw"]),
+        pose=np.asarray(pose) if pose is not None else np.empty((0,), dtype=np.float32),
+        has_pose=np.array(pose is not None),
+        bone_names=np.asarray(list(bones_idx_dict.keys()), dtype=str),
+        bone_indices=np.asarray(list(bones_idx_dict.values()), dtype=np.int64),
+        parent_indices=np.asarray(parent_indices, dtype=np.int64),
+    )
+
+    try:
+        cmd = [
+            sys.executable,
+            str(worker_path),
+            payload_path,
+            output_path,
+            str(template_path),
+        ]
+        if remove_fingers:
+            cmd.append("--remove-fingers")
+        if reset_to_rest:
+            cmd.append("--reset-to-rest")
+        if embed_textures:
+            cmd.append("--embed-textures")
+
+        log.info("Exporting rigged asset via isolated bpy worker: %s", output_path)
+        process = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        if process.stdout:
+            log.info("MIA Blender worker stdout:\n%s", process.stdout.strip())
+        if process.returncode != 0:
+            details = (process.stderr or process.stdout or "Unknown worker failure").strip()
+            raise RuntimeError(
+                "MIA Blender export failed in isolated bpy worker "
+                f"(exit code {process.returncode}): {details}"
+            )
+    finally:
+        try:
+            os.remove(payload_path)
+        except OSError:
+            pass
+        if temp_mesh_path:
+            try:
+                os.remove(temp_mesh_path)
+            except OSError:
+                pass
 
     if not os.path.exists(output_path):
         raise RuntimeError(f"Export completed but output file not created: {output_path}")

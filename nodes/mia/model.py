@@ -55,7 +55,7 @@ class Embedder3D(nn.Module):
         Returns:
             [B, N, `dim]
         """
-        projections = torch.einsum("bnd,de->bne", xyz, self.basis)
+        projections = torch.einsum("bnd,de->bne", xyz, self.basis.to(device=xyz.device))
         return torch.cat([projections.sin(), projections.cos()], dim=2)
 
     def forward(self, xyz: torch.Tensor):
@@ -169,7 +169,7 @@ class JointsAttention(nn.Module):
             [B, N, D]
         """
         out = self.attn(
-            self.norm_pre(feat), mask=None if self.mask is None else self.mask.expand(feat.shape[0], -1, -1)
+            self.norm_pre(feat), mask=None if self.mask is None else self.mask.to(device=feat.device).expand(feat.shape[0], -1, -1)
         )
         out = out + feat
         out = self.norm_after(out)
@@ -594,9 +594,9 @@ class PCAE(nn.Module):
         x = self.encode(pc)
 
         learnable_embeddings = (
-            self.joints_embed if self.predict_joints else None,
-            self.global_embed if self.predict_global_trans else None,
-            self.pose_embed if self.predict_pose_trans else None,
+            self.joints_embed.to(device=pc.device, dtype=pc.dtype) if self.predict_joints else None,
+            self.global_embed.to(device=pc.device, dtype=pc.dtype) if self.predict_global_trans else None,
+            self.pose_embed.to(device=pc.device, dtype=pc.dtype) if self.predict_pose_trans else None,
         )
         learnable_embeddings_length = [0 if x is None else x.shape[1] for x in learnable_embeddings]
         learnable_embeddings = [x for x in learnable_embeddings if x is not None]
@@ -757,6 +757,7 @@ class Transformer(nn.Module):
         Returns:
             [B, N, D]
         """
+        self.layers.to(x.device)
         x = self.layers(x, mask=~mask)
         return x
 
@@ -877,13 +878,13 @@ class JointsAttentionCausal(nn.Module):
             out_gt = matrix_to_ortho6d(ortho6d_to_matrix(out_gt))
         out_gt_feat: torch.Tensor = self.encoder(out_gt)  # B, N, D
         out_gt_feat = out_gt_feat.unsqueeze(1).expand(-1, N, -1, -1).clone()  # B, (N), N, D
-        out_gt_feat[~self.mask_parent.expand(B, -1, -1)] = 0
+        out_gt_feat[~self.mask_parent.to(device=feat.device).expand(B, -1, -1)] = 0
         out_gt_feat = out_gt_feat.sum(-2)  # B, (N), D
         if self.query_type == "embedding":
             in_feat = out_gt_feat + feat
         else:
             raise NotImplementedError(f"{self.query_type=}")
-        in_feat_attn = self.transformer(in_feat, mask=self.mask_attn)
+        in_feat_attn = self.transformer(in_feat, mask=self.mask_attn.to(device=feat.device))
         # out = self.decoder(feat + in_feat_attn)
         out = self.decoder(in_feat_attn)
         return out
@@ -902,7 +903,7 @@ class JointsAttentionCausal(nn.Module):
             out = self._forward(feat, out_gt)
         else:
             out = torch.zeros((B, N, self.out_dim), dtype=feat.dtype, device=feat.device)
-            for mask in self.tree_levels_mask:
+            for mask in self.tree_levels_mask.to(device=feat.device):
                 if not any(mask):
                     continue
                 out_ = self._forward(feat, out)

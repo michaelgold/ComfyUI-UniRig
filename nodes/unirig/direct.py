@@ -11,12 +11,16 @@ import torch
 import numpy as np
 from typing import Optional, Dict, Any, Tuple, List
 import logging
-import comfy.model_management
 import comfy.model_patcher
 import comfy.ops
 import comfy.utils
 
 log = logging.getLogger("unirig")
+
+
+def _mm():
+    import comfy.model_management
+    return comfy.model_management
 
 # Local model cache for the worker process. Keeps loaded models + ModelPatchers
 # in memory across prompt executions within the same persistent worker.
@@ -118,7 +122,7 @@ def normalize_vertices(vertices: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]
 
 def _get_device():
     """Get the best available device."""
-    return comfy.model_management.get_torch_device()
+    return _mm().get_torch_device()
 
 
 _DTYPE_MAP = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}
@@ -130,11 +134,43 @@ def _resolve_dtype(dtype):
     return dtype
 
 
+def _fix_leftover_meta_tensors(model):
+    """Replace any leftover meta-device parameters/buffers with real CPU tensors.
+
+    After constructing a model on torch.device('meta') and loading weights with
+    assign=True, registered buffers that are not present in the state_dict remain
+    on the meta device.  This helper materialises them on CPU so the model is
+    fully usable.
+    """
+    # Fix meta buffers (e.g. FrequencyPositionalEmbedding.frequencies)
+    for name, buf in list(model.named_buffers()):
+        if buf.device.type == "meta":
+            parts = name.split(".")
+            parent = model
+            for p in parts[:-1]:
+                parent = getattr(parent, p)
+            parent._buffers[parts[-1]] = torch.zeros_like(buf, device="cpu")
+
+    # Fix meta parameters (shouldn't happen if state_dict is complete, but be safe)
+    for name, param in list(model.named_parameters()):
+        if param.device.type == "meta":
+            parts = name.split(".")
+            parent = model
+            for p in parts[:-1]:
+                parent = getattr(parent, p)
+            parent._parameters[parts[-1]] = torch.nn.Parameter(
+                torch.zeros_like(param, device="cpu"),
+                requires_grad=param.requires_grad,
+            )
+
+
 def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto"):
     """
     Load the skeleton (AR) model directly.
 
-    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
+    Uses meta-device initialization to avoid 2x RAM during model construction:
+    the model is first built on torch.device('meta') (zero memory), then real
+    weights are loaded from disk and assigned in-place.
 
     Args:
         checkpoint_path: Path to skeleton.safetensors
@@ -172,15 +208,17 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
     # Build tokenizer from inlined config
     tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=TOKENIZER_CONFIG))
 
-    # Build model with dtype/device/operations injected
+    # Build model on meta device (zero RAM) to avoid 2x memory during construction
+    log.info("Building skeleton model on meta device (zero RAM allocation)...")
     model_config = dict(AR_MODEL_CONFIG)
     model_config['tokenizer'] = tokenizer
     model_config['dtype'] = model_dtype
-    model_config['device'] = 'cpu'
+    model_config['device'] = 'meta'
     model_config['operations'] = operations
-    model = get_model(**model_config)
+    with torch.device("meta"):
+        model = get_model(**model_config)
 
-    # Load weights with comfy.utils (safe, memory-efficient)
+    # Load weights with comfy.utils (safe, memory-efficient) and assign directly
     log.info("Loading skeleton weights from %s", checkpoint_path)
     state_dict = comfy.utils.load_torch_file(checkpoint_path)
 
@@ -190,14 +228,35 @@ def _load_skeleton_model(checkpoint_path: str, dtype=None, attn_backend: str = "
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    model.load_state_dict(cleaned_state_dict, strict=False)
+    # assign=True: directly replace meta tensors with loaded tensors (no copy)
+    result = model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    log.debug("Skeleton load_state_dict: missing=%d, unexpected=%d", len(result.missing_keys), len(result.unexpected_keys))
+    if result.missing_keys:
+        log.debug("  Missing keys: %s", result.missing_keys[:20])
+    if result.unexpected_keys:
+        log.debug("  Unexpected keys: %s", result.unexpected_keys[:20])
+
+    # Fix any leftover meta-device buffers not present in state_dict
+    meta_count = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers before fix: %d", meta_count)
+    _fix_leftover_meta_tensors(model)
+    meta_count_after = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers after fix: %d", meta_count_after)
+
     model.eval()
+
+    # Debug: verify frequency buffers are non-zero
+    for name, buf in model.named_buffers():
+        if "frequencies" in name:
+            log.debug("Buffer %s: shape=%s, device=%s, first_5=%s", name, buf.shape, buf.device, buf[:5].tolist() if buf.numel() >= 5 else buf.tolist())
 
     # Safety net: ensure all weights match requested dtype
     if model_dtype is not None:
         model = model.to(dtype=model_dtype)
         log.info("Skeleton model dtype: %s", model_dtype)
 
+    param_count = sum(p.numel() for p in model.parameters())
+    log.debug("Skeleton model params: %d (%.1f M)", param_count, param_count / 1e6)
     log.info("Skeleton model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model, tokenizer
 
@@ -206,7 +265,9 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
     """
     Load the skinning model directly.
 
-    Uses comfy.ops.pick_operations for dtype-aware layer initialization.
+    Uses meta-device initialization to avoid 2x RAM during model construction:
+    the model is first built on torch.device('meta') (zero memory), then real
+    weights are loaded from disk and assigned in-place.
 
     Args:
         checkpoint_path: Path to skin.safetensors
@@ -229,14 +290,16 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         operations = comfy.ops.disable_weight_init
     log.info("Skin ops: %s (dtype=%s)", operations, model_dtype)
 
-    # Build model with dtype/device/operations injected
+    # Build model on meta device (zero RAM) to avoid 2x memory during construction
+    log.info("Building skin model on meta device (zero RAM allocation)...")
     model_config = dict(SKIN_MODEL_CONFIG)
     model_config['dtype'] = model_dtype
-    model_config['device'] = 'cpu'
+    model_config['device'] = 'meta'
     model_config['operations'] = operations
-    model = get_model(tokenizer=None, **model_config)
+    with torch.device("meta"):
+        model = get_model(tokenizer=None, **model_config)
 
-    # Load weights with comfy.utils (safe, memory-efficient)
+    # Load weights with comfy.utils (safe, memory-efficient) and assign directly
     log.info("Loading skin weights from %s", checkpoint_path)
     state_dict = comfy.utils.load_torch_file(checkpoint_path)
 
@@ -246,14 +309,35 @@ def _load_skin_model(checkpoint_path: str, dtype=None, attn_backend: str = "auto
         new_key = k[6:] if k.startswith('model.') else k
         cleaned_state_dict[new_key] = v
 
-    model.load_state_dict(cleaned_state_dict, strict=False)
+    # assign=True: directly replace meta tensors with loaded tensors (no copy)
+    result = model.load_state_dict(cleaned_state_dict, strict=False, assign=True)
+    log.debug("Skin load_state_dict: missing=%d, unexpected=%d", len(result.missing_keys), len(result.unexpected_keys))
+    if result.missing_keys:
+        log.debug("  Missing keys: %s", result.missing_keys[:20])
+    if result.unexpected_keys:
+        log.debug("  Unexpected keys: %s", result.unexpected_keys[:20])
+
+    # Fix any leftover meta-device buffers not present in state_dict
+    meta_count = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers before fix: %d", meta_count)
+    _fix_leftover_meta_tensors(model)
+    meta_count_after = sum(1 for _, b in model.named_buffers() if b.device.type == "meta")
+    log.debug("Leftover meta buffers after fix: %d", meta_count_after)
+
     model.eval()
+
+    # Debug: verify frequency buffers are non-zero
+    for name, buf in model.named_buffers():
+        if "frequencies" in name:
+            log.debug("Buffer %s: shape=%s, device=%s, first_5=%s", name, buf.shape, buf.device, buf[:5].tolist() if buf.numel() >= 5 else buf.tolist())
 
     # Safety net: ensure all weights match requested dtype
     if model_dtype is not None:
         model = model.to(dtype=model_dtype)
         log.info("Skin model dtype: %s", model_dtype)
 
+    param_count = sum(p.numel() for p in model.parameters())
+    log.debug("Skin model params: %d (%.1f M)", param_count, param_count / 1e6)
     log.info("Skin model ready (on CPU, will be moved to GPU by ModelPatcher)")
     return model
 
@@ -275,7 +359,7 @@ def get_skeleton_model(
         model, tokenizer = _load_skeleton_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
-        load_device = comfy.model_management.get_torch_device()
+        load_device = _mm().get_torch_device()
         offload_device = torch.device("cpu")
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
@@ -302,7 +386,7 @@ def get_skin_model(
         model = _load_skin_model(
             checkpoint_path, dtype=dtype, attn_backend=attn_backend
         )
-        load_device = comfy.model_management.get_torch_device()
+        load_device = _mm().get_torch_device()
         offload_device = torch.device("cpu")
         patcher = comfy.model_patcher.ModelPatcher(
             model, load_device=load_device, offload_device=offload_device
@@ -345,12 +429,20 @@ def predict_skeleton(
         checkpoint_path, dtype=dtype, attn_backend=attn_backend
     )
 
-    # Let ComfyUI manage GPU memory
-    comfy.model_management.load_models_gpu([patcher])
+    # Let ComfyUI manage GPU memory — beam search (15 beams × 2048 tokens) needs ~2 GB
+    memory_required = 2 * 1024 * 1024 * 1024
+    _mm().load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
+
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skeleton] after load_models_gpu: allocated=%.2fGB reserved=%.2fGB", a, r)
 
     # Convert to tensors in the model's dtype
     model_dtype = patcher.model.get_dtype() or torch.float32
+    log.debug("[VRAM predict_skeleton] vertices=%s, normals=%s, dtype=%s, device=%s, cls=%s",
+              vertices.shape, normals.shape, model_dtype, device, cls)
     vertices_t = torch.from_numpy(vertices).to(dtype=model_dtype, device=device)
     normals_t = torch.from_numpy(normals).to(dtype=model_dtype, device=device)
 
@@ -365,8 +457,13 @@ def predict_skeleton(
         'temperature': 1.5,
     }
     default_kwargs.update(generate_kwargs)
+    log.debug("Generation kwargs: %s", default_kwargs)
 
     # Run generation
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skeleton] before generate: allocated=%.2fGB reserved=%.2fGB", a, r)
     model = patcher.model
     result = model.generate(
         vertices=vertices_t,
@@ -374,6 +471,10 @@ def predict_skeleton(
         cls=cls,
         **default_kwargs,
     )
+
+    # Release fragmented CUDA blocks from beam search before skinning runs
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     # Convert result to dict of numpy arrays
     output = {
@@ -389,6 +490,10 @@ def predict_skeleton(
             if val is not None:
                 output[attr] = np.array(val) if isinstance(val, (list, tuple)) else val
 
+    log.debug("predict_skeleton output: joints=%s, parents=%s, names=%s",
+              output['joints'].shape if output['joints'] is not None else None,
+              output['parents'].shape if output['parents'] is not None else None,
+              output['names'][:5] if output['names'] is not None else None)
     return output
 
 
@@ -429,12 +534,20 @@ def predict_skinning(
         checkpoint_path, dtype=dtype, attn_backend=attn_backend
     )
 
-    # Let ComfyUI manage GPU memory
-    comfy.model_management.load_models_gpu([patcher])
+    # Let ComfyUI manage GPU memory — skinning forward pass needs ~1 GB
+    memory_required = 1 * 1024 * 1024 * 1024
+    _mm().load_models_gpu([patcher], memory_required=memory_required)
     device = patcher.load_device
+
+    if device.type == 'cuda':
+        a = torch.cuda.memory_allocated(device) / (1024**3)
+        r = torch.cuda.memory_reserved(device) / (1024**3)
+        log.debug("[VRAM predict_skinning] after load_models_gpu: allocated=%.2fGB reserved=%.2fGB", a, r)
 
     num_joints = len(joints)
     num_vertices = len(vertices)
+    log.debug("[VRAM predict_skinning] vertices=%s, normals=%s, joints=%s, parents=%s, dtype=%s, device=%s",
+              vertices.shape, normals.shape, joints.shape, parents.shape, dtype, device)
 
     # Compute tails if not provided (use joint positions as tails)
     if tails is None:
@@ -471,12 +584,14 @@ def predict_skinning(
         )
         voxel_skin_weights = np.nan_to_num(voxel_skin_weights, nan=0., posinf=0., neginf=0.)
         log.info("voxel_skin shape: %s", voxel_skin_weights.shape)
+        log.debug("voxel_skin range: min=%.6f, max=%.6f, mean=%.6f", voxel_skin_weights.min(), voxel_skin_weights.max(), voxel_skin_weights.mean())
     else:
         # Fallback: zero voxel_skin
         voxel_skin_weights = np.zeros((num_joints, num_vertices), dtype=np.float32)
 
     # Prepare batch in the model's dtype
     model_dtype = patcher.model.get_dtype() or torch.float32
+    log.debug("Skin model dtype: %s", model_dtype)
     batch = {
         'vertices': torch.from_numpy(vertices).to(dtype=model_dtype).unsqueeze(0).to(device),
         'normals': torch.from_numpy(normals).to(dtype=model_dtype).unsqueeze(0).to(device),
@@ -489,8 +604,14 @@ def predict_skinning(
         'path': ['direct_inference'],
     }
 
+    # Debug: log batch tensor shapes
+    for k, v in batch.items():
+        if isinstance(v, torch.Tensor):
+            log.debug("Batch[%s]: shape=%s, dtype=%s, device=%s", k, v.shape, v.dtype, v.device)
+
     # Run prediction
     model = patcher.model
+    model.to(device)
     result = model.predict_step(batch)
 
     # Extract skin weights - result is a list of tensors, one per batch
@@ -498,6 +619,7 @@ def predict_skinning(
     if isinstance(skin_weights, torch.Tensor):
         skin_weights = skin_weights.cpu().float().numpy()
 
+    log.debug("predict_skinning output: shape=%s, min=%.6f, max=%.6f", skin_weights.shape, skin_weights.min(), skin_weights.max())
     return skin_weights
 
 
@@ -536,6 +658,8 @@ def predict_skeleton_from_mesh(
     """
     # 1. Normalize mesh vertices
     norm_vertices, norm_params = normalize_vertices(vertices)
+    log.debug("Normalized vertices: shape=%s, range=[%.3f, %.3f]", norm_vertices.shape, norm_vertices.min(), norm_vertices.max())
+    log.debug("Normalization: center=%s, scale=%.4f", norm_params['center'], norm_params['scale'])
 
     # 2. Sample surface points
     sampled_points, sampled_normals = sample_mesh_surface(
@@ -544,6 +668,7 @@ def predict_skeleton_from_mesh(
         num_samples=num_samples,
         seed=seed,
     )
+    log.debug("Sampled %d surface points, normals shape=%s", len(sampled_points), sampled_normals.shape)
 
     # 3. Run skeleton prediction
     skeleton = predict_skeleton(

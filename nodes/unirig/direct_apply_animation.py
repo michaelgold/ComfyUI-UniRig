@@ -208,17 +208,22 @@ def _apply_direct_copy(model_armature, anim_armature, anim_action, model_meshes,
     anim_scale = anim_armature.scale[0]
     model_scale = model_armature.scale[0]
 
+    # Blender 4.4 moved fcurves under action.layers[0].strips[0].channelbags[0];
+    # _bpy_compat.action_fcurves bridges 4.2-vs-4.4+ API.
+    from ._bpy_compat import action_fcurves
+    new_action_fcurves = action_fcurves(new_action)
+
     if abs(anim_scale - model_scale) > 0.0001:
         scale_factor = anim_scale / model_scale
         log.info(f"Scaling location keyframes by {scale_factor:.4f}x")
-        for fc in new_action.fcurves:
+        for fc in new_action_fcurves:
             if '.location' in fc.data_path:
                 for kfp in fc.keyframe_points:
                     kfp.co[1] *= scale_factor
                     kfp.handle_left[1] *= scale_factor
                     kfp.handle_right[1] *= scale_factor
 
-    log.info(f"Direct copy complete - {len(new_action.fcurves)} F-curves")
+    log.info(f"Direct copy complete - {len(new_action_fcurves)} F-curves")
 
     # Cleanup
     bpy.data.objects.remove(anim_armature, do_unlink=True)
@@ -246,9 +251,15 @@ def _apply_partial_copy(model_armature, anim_armature, anim_action, matching_bon
     model_scale = model_armature.scale[0]
     scale_factor = anim_scale / model_scale if model_scale != 0 else 1.0
 
+    # _bpy_compat.action_fcurves bridges 4.2-vs-4.4+ API; on 4.4+ it
+    # also seeds the layer/strip/channelbag for newly-created actions.
+    from ._bpy_compat import action_fcurves
+    anim_action_fcurves = action_fcurves(anim_action)
+    new_action_fcurves = action_fcurves(new_action)
+
     # Copy F-curves for matching bones
     copied_fcurves = 0
-    for fc in anim_action.fcurves:
+    for fc in anim_action_fcurves:
         # Extract bone name from data_path like 'pose.bones["mixamorig:Hips"].location'
         if 'pose.bones["' in fc.data_path:
             start = fc.data_path.find('pose.bones["') + len('pose.bones["')
@@ -257,7 +268,7 @@ def _apply_partial_copy(model_armature, anim_armature, anim_action, matching_bon
 
             if bone_name in matching_bones:
                 # Create new fcurve in our action
-                new_fc = new_action.fcurves.new(data_path=fc.data_path, index=fc.array_index)
+                new_fc = new_action_fcurves.new(data_path=fc.data_path, index=fc.array_index)
 
                 # Copy keyframes
                 for kfp in fc.keyframe_points:
@@ -329,10 +340,12 @@ def _export_fbx(model_armature, model_meshes, output_fbx):
     else:
         log.warning("PIL not available, skipping image alpha fix")
 
+    from ._bpy_compat import set_material_opaque
     for mat in bpy.data.materials:
         if mat:
-            mat.blend_method = 'OPAQUE'
-            mat.shadow_method = 'OPAQUE'
+            # Blender 4.2 removed `shadow_method`; portable shim for
+            # 4.1/4.2/4.3+/5.x lives in _bpy_compat.
+            set_material_opaque(mat)
             if mat.use_nodes and mat.node_tree:
                 # Find nodes that are ONLY connected to Alpha (and remove them)
                 nodes_to_remove = []

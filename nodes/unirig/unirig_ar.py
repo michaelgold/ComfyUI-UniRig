@@ -140,6 +140,10 @@ class UniRigAR(ModelSpec):
         """Single-sample generation (no batch support)."""
         cond = self.encode_mesh_cond(vertices=vertices, normals=normals).to(dtype=self.transformer.dtype)
 
+        # Move the entire HF transformer to the inference device so all
+        # internal embeddings / layers are on the same device as inputs.
+        self.transformer.to(cond.device)
+
         start_tokens = [self.tokenizer.bos]
 
         if cls is not None:
