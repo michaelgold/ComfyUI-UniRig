@@ -641,7 +641,20 @@ def _export_mia_fbx_direct(
         # Export directly to GLB when requested. This avoids Blender's FBX exporter,
         # which can segfault in headless CUDA CI even after MIA inference succeeds.
         if output_path.lower().endswith(".glb"):
+            # Match the old FBX->GLB path's transform baking. The Mixamo
+            # template imports with an object-level 0.01 armature scale; if that
+            # scale is left on the glTF armature root, some consumers display
+            # child bones ~100x too large. Bake object transforms into the mesh
+            # and armature data before direct GLB export.
+            bpy.ops.object.mode_set(mode='OBJECT') if bpy.ops.object.mode_set.poll() else None
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in [armature, *input_meshes]:
+                obj.select_set(True)
+            bpy.context.view_layer.objects.active = armature
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.update()
+
             export_result = bpy.ops.export_scene.gltf(
                 filepath=output_path,
                 export_format='GLB',
