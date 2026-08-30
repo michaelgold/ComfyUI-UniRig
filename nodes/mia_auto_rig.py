@@ -57,7 +57,7 @@ class MIAAutoRig(io.ComfyNode):
                                  tooltip="Transform output to T-pose rest position for animation compatibility."),
                 io.Int.Input("target_face_count", default=50000, min=10000, max=500000, step=10000,
                              optional=True,
-                             tooltip="Simplify the mesh to this face count before MIA inference/export. Lower values make Blender FBX export more stable in CI."),
+                             tooltip="Simplify materially oversized meshes to this face count before MIA inference/export. Requests that remove 5% or less of source faces are skipped to preserve UVs and materials."),
                 io.Boolean.Input("embed_textures", default=True, optional=True,
                                  tooltip="Embed textures in the intermediate FBX. Disable for CI/headless runs if Blender FBX export is unstable."),
             ],
