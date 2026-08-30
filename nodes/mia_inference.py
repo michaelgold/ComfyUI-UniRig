@@ -15,6 +15,8 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 import logging
 import comfy.utils
 
+from .isolated_bpy import blender_worker_environment
+
 log = logging.getLogger("unirig")
 
 
@@ -934,7 +936,13 @@ def _export_mia_fbx(
             cmd.append("--embed-textures")
 
         log.info("Exporting rigged asset via isolated bpy worker: %s", output_path)
-        process = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        process = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env=blender_worker_environment(),
+        )
         if process.stdout:
             log.info("MIA Blender worker stdout:\n%s", process.stdout.strip())
         if process.returncode != 0:
