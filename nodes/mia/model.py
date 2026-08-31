@@ -22,6 +22,10 @@ def _get_fps():
 
 from .models_ae import Attention, DiagonalGaussianDistribution, create_autoencoder
 from .dataset_mixamo import Joint
+from .checkpoint_policy import (
+    adapt_checkpoint_parameter,
+    initialize_parameter_if_materialized,
+)
 from .utils import find_ckpt
 
 Output = NamedTuple(
@@ -184,8 +188,8 @@ class InputAttention(nn.Module):
         self.norm = operations.LayerNorm(feat_dim)
         self.norm_context = operations.LayerNorm(feat_dim)
         self.attn = Attention(query_dim=feat_dim, heads=heads, dim_head=dim_head, operations=operations, *args, **xargs)
-        nn.init.zeros_(self.attn.to_out.weight)
-        nn.init.zeros_(self.attn.to_out.bias)
+        initialize_parameter_if_materialized(self.attn.to_out.weight, nn.init.zeros_)
+        initialize_parameter_if_materialized(self.attn.to_out.bias, nn.init.zeros_)
 
     def forward(self, feat: torch.Tensor, context: torch.Tensor, return_score=False):
         """
@@ -255,8 +259,8 @@ class PCAE(nn.Module):
         if self.input_normal:
             self.input_dims.append(3)
             self.normal_embed = JointsEmbedder(out_dim=embed_dim, operations=operations)
-            nn.init.zeros_(self.normal_embed.mlp.weight)
-            nn.init.zeros_(self.normal_embed.mlp.bias)
+            initialize_parameter_if_materialized(self.normal_embed.mlp.weight, nn.init.zeros_)
+            initialize_parameter_if_materialized(self.normal_embed.mlp.bias, nn.init.zeros_)
         else:
             self.input_dims.append(0)
         self.input_dim = sum(self.input_dims)
@@ -381,10 +385,24 @@ class PCAE(nn.Module):
         for k in params2replace:
             if k in ckpt:
                 ckpt_param = ckpt[k]
-                model_param = access_attr(self, k)
-                if ckpt_param.shape != model_param.shape:
-                    log.info("Size mismatch for %s: %s from checkpoint vs %s from model. Ignoring it.", k, ckpt_param.shape, model_param.shape)
-                    ckpt[k] = model_param.to(ckpt_param)
+                module_path, parameter_name = k.rsplit(".", 1)
+                model_module = access_attr(self, module_path)
+                model_param = getattr(model_module, parameter_name)
+                adapted_param = adapt_checkpoint_parameter(
+                    key=k,
+                    checkpoint_parameter=ckpt_param,
+                    model_parameter=model_param,
+                    module=model_module,
+                    parameter_name=parameter_name,
+                )
+                if adapted_param is not ckpt_param:
+                    log.info(
+                        "Size mismatch for %s: %s from checkpoint vs %s from model. Ignoring it.",
+                        k,
+                        ckpt_param.shape,
+                        model_param.shape,
+                    )
+                    ckpt[k] = adapted_param
 
         params2remove = [
             "normal_embed.embed.basis",
@@ -744,10 +762,10 @@ class Transformer(nn.Module):
         if zero_init:
             for layer in self.layers.layers:
                 layer: nn.TransformerEncoderLayer
-                nn.init.zeros_(layer.self_attn.out_proj.weight)
-                nn.init.zeros_(layer.self_attn.out_proj.bias)
-                nn.init.zeros_(layer.linear2.weight)
-                nn.init.zeros_(layer.linear2.bias)
+                initialize_parameter_if_materialized(layer.self_attn.out_proj.weight, nn.init.zeros_)
+                initialize_parameter_if_materialized(layer.self_attn.out_proj.bias, nn.init.zeros_)
+                initialize_parameter_if_materialized(layer.linear2.weight, nn.init.zeros_)
+                initialize_parameter_if_materialized(layer.linear2.bias, nn.init.zeros_)
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None):
         """
@@ -844,8 +862,8 @@ class JointsAttentionCausal(nn.Module):
         elif self.out_type == "pose":
             self.encoder = operations.Linear(self.out_dim, feat_dim)
             if zero_init:
-                nn.init.zeros_(self.encoder.weight)
-                nn.init.zeros_(self.encoder.bias)
+                initialize_parameter_if_materialized(self.encoder.weight, nn.init.zeros_)
+                initialize_parameter_if_materialized(self.encoder.bias, nn.init.zeros_)
             self.decoder = TransformMLP(
                 feat_dim, transl_dim=self.out_dim - rotation_dim, rotation_dim=rotation_dim, scaling_dim=0, operations=operations
             )
