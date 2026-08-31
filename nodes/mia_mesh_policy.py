@@ -10,7 +10,7 @@ SIMPLIFICATION_TOLERANCE_PERCENT = 5
 
 
 def _is_python_argument_binding_failure(callable_obj: Any, exc: TypeError) -> bool:
-    """Return true only when a direct Python callable body was not entered.
+    """Return True only when a direct Python callable body was not entered.
 
     Wrappers, classes, builtins, and C-extension callables fail closed: their
     TypeErrors are ambiguous and are never retried with another convention.
