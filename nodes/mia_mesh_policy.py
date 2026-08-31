@@ -72,20 +72,24 @@ def simplify_mesh_if_needed(
             )
         return mesh
 
-    parameters = inspect.signature(simplify).parameters.values()
-    supports_face_count_keyword = any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD
-        or (
-            parameter.name == "face_count"
-            and parameter.kind
-            in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-        )
-        for parameter in parameters
-    )
-    if supports_face_count_keyword:
-        simplified = simplify(face_count=int(target_face_count))
-    else:
+    try:
+        parameters = inspect.signature(simplify).parameters.values()
+    except (TypeError, ValueError):
         simplified = simplify(int(target_face_count))
+    else:
+        supports_face_count_keyword = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            or (
+                parameter.name == "face_count"
+                and parameter.kind
+                in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            )
+            for parameter in parameters
+        )
+        if supports_face_count_keyword:
+            simplified = simplify(face_count=int(target_face_count))
+        else:
+            simplified = simplify(int(target_face_count))
 
     if simplified is not None and hasattr(simplified, "faces") and len(simplified.faces) > 0:
         if logger is not None:

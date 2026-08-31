@@ -127,3 +127,72 @@ def test_unavailable_or_unusable_simplifier_preserves_original_mesh():
 
     for mesh in (NoSimplifier(), NoneSimplifier(), EmptySimplifier()):
         assert policy.simplify_mesh_if_needed(mesh, 80_000) is mesh
+
+
+def test_uninspectable_positional_simplifier_is_supported():
+    policy = _load_policy_module()
+
+    class MeshResult:
+        def __init__(self, face_count):
+            self.faces = [None] * face_count
+            self.vertices = [None]
+
+    class PositionalSimplifier:
+        def __init__(self):
+            self.calls = []
+
+        @property
+        def __signature__(self):
+            raise ValueError("signature unavailable")
+
+        def __call__(self, face_count, /):
+            self.calls.append(face_count)
+            return MeshResult(face_count)
+
+    class Mesh:
+        faces = [None] * 100_000
+        vertices = [None]
+
+        def __init__(self):
+            self.simplify_quadric_decimation = PositionalSimplifier()
+
+    mesh = Mesh()
+    simplified = policy.simplify_mesh_if_needed(mesh, 80_000)
+
+    assert len(simplified.faces) == 80_000
+    assert mesh.simplify_quadric_decimation.calls == [80_000]
+
+
+def test_uninspectable_internal_type_error_is_not_retried():
+    policy = _load_policy_module()
+
+    class FailingSimplifier:
+        def __init__(self):
+            self.calls = []
+
+        @property
+        def __signature__(self):
+            raise ValueError("signature unavailable")
+
+        def __call__(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise TypeError("face_count keyword processing failed")
+
+    class Mesh:
+        faces = [None] * 100_000
+        vertices = [None]
+
+        def __init__(self):
+            self.simplify_quadric_decimation = FailingSimplifier()
+
+    mesh = Mesh()
+    try:
+        policy.simplify_mesh_if_needed(mesh, 80_000)
+    except TypeError as exc:
+        assert str(exc) == "face_count keyword processing failed"
+    else:
+        raise AssertionError("internal TypeError should propagate")
+
+    assert mesh.simplify_quadric_decimation.calls == [
+        ((80_000,), {})
+    ]
