@@ -62,8 +62,10 @@ def simplify_mesh_if_needed(
         )
 
     simplify = getattr(mesh, "simplify_quadric_decimation", None)
+    uninspectable_uses_keyword = simplify is not None
     if simplify is None:
         simplify = getattr(mesh, "simplify_quadratic_decimation", None)
+        uninspectable_uses_keyword = False
     if simplify is None:
         if logger is not None:
             logger.warning(
@@ -75,7 +77,10 @@ def simplify_mesh_if_needed(
     try:
         parameters = inspect.signature(simplify).parameters.values()
     except (TypeError, ValueError):
-        simplified = simplify(int(target_face_count))
+        if uninspectable_uses_keyword:
+            simplified = simplify(face_count=int(target_face_count))
+        else:
+            simplified = simplify(int(target_face_count))
     else:
         supports_face_count_keyword = any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
@@ -91,7 +96,13 @@ def simplify_mesh_if_needed(
         else:
             simplified = simplify(int(target_face_count))
 
-    if simplified is not None and hasattr(simplified, "faces") and len(simplified.faces) > 0:
+    if (
+        simplified is not None
+        and hasattr(simplified, "faces")
+        and hasattr(simplified, "vertices")
+        and len(simplified.faces) > 0
+        and len(simplified.vertices) > 0
+    ):
         if logger is not None:
             logger.info(
                 "Simplified MIA input mesh to %d vertices, %d faces",
