@@ -9,6 +9,22 @@ from typing import Any
 SIMPLIFICATION_TOLERANCE_PERCENT = 5
 
 
+def _is_python_argument_binding_failure(callable_obj: Any, exc: TypeError) -> bool:
+    """Return true only when a direct Python callable body was not entered.
+
+    Wrappers, classes, builtins, and C-extension callables fail closed: their
+    TypeErrors are ambiguous and are never retried with another convention.
+    """
+    callable_impl = getattr(type(callable_obj), "__call__", None)
+    is_python_callable = (
+        inspect.isfunction(callable_obj)
+        or inspect.ismethod(callable_obj)
+        or inspect.isfunction(callable_impl)
+    )
+    traceback = exc.__traceback__
+    return is_python_callable and traceback is not None and traceback.tb_next is None
+
+
 def should_simplify_mesh(
     face_count: int,
     target_face_count: int | None,
@@ -78,9 +94,19 @@ def simplify_mesh_if_needed(
         parameters = inspect.signature(simplify).parameters.values()
     except (TypeError, ValueError):
         if uninspectable_uses_keyword:
-            simplified = simplify(face_count=int(target_face_count))
+            try:
+                simplified = simplify(face_count=int(target_face_count))
+            except TypeError as exc:
+                if not _is_python_argument_binding_failure(simplify, exc):
+                    raise
+                simplified = simplify(int(target_face_count))
         else:
-            simplified = simplify(int(target_face_count))
+            try:
+                simplified = simplify(int(target_face_count))
+            except TypeError as exc:
+                if not _is_python_argument_binding_failure(simplify, exc):
+                    raise
+                simplified = simplify(face_count=int(target_face_count))
     else:
         supports_face_count_keyword = any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD

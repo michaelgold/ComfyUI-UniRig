@@ -1,3 +1,4 @@
+import functools
 import importlib.util
 from pathlib import Path
 
@@ -209,6 +210,74 @@ def test_uninspectable_keyword_only_modern_simplifier_is_supported():
     assert mesh.simplify_quadric_decimation.calls == [80_000]
 
 
+def test_uninspectable_modern_name_retries_positional_binding_failure():
+    policy = _load_policy_module()
+
+    class MeshResult:
+        def __init__(self, face_count):
+            self.faces = [None] * face_count
+            self.vertices = [None]
+
+    class PositionalOnlySimplifier:
+        def __init__(self):
+            self.calls = []
+
+        @property
+        def __signature__(self):
+            raise ValueError("signature unavailable")
+
+        def __call__(self, face_count, /):
+            self.calls.append(face_count)
+            return MeshResult(face_count)
+
+    class Mesh:
+        faces = [None] * 100_000
+        vertices = [None]
+
+        def __init__(self):
+            self.simplify_quadric_decimation = PositionalOnlySimplifier()
+
+    mesh = Mesh()
+    simplified = policy.simplify_mesh_if_needed(mesh, 80_000)
+
+    assert len(simplified.faces) == 80_000
+    assert mesh.simplify_quadric_decimation.calls == [80_000]
+
+
+def test_uninspectable_legacy_name_retries_keyword_binding_failure():
+    policy = _load_policy_module()
+
+    class MeshResult:
+        def __init__(self, face_count):
+            self.faces = [None] * face_count
+            self.vertices = [None]
+
+    class KeywordOnlySimplifier:
+        def __init__(self):
+            self.calls = []
+
+        @property
+        def __signature__(self):
+            raise ValueError("signature unavailable")
+
+        def __call__(self, *, face_count):
+            self.calls.append(face_count)
+            return MeshResult(face_count)
+
+    class Mesh:
+        faces = [None] * 100_000
+        vertices = [None]
+
+        def __init__(self):
+            self.simplify_quadratic_decimation = KeywordOnlySimplifier()
+
+    mesh = Mesh()
+    simplified = policy.simplify_mesh_if_needed(mesh, 80_000)
+
+    assert len(simplified.faces) == 80_000
+    assert mesh.simplify_quadratic_decimation.calls == [80_000]
+
+
 def test_uninspectable_internal_type_error_is_not_retried():
     policy = _load_policy_module()
 
@@ -242,3 +311,29 @@ def test_uninspectable_internal_type_error_is_not_retried():
     assert mesh.simplify_quadric_decimation.calls == [
         ((), {"face_count": 80_000})
     ]
+
+
+def test_uninspectable_partial_internal_type_error_is_not_retried():
+    policy = _load_policy_module()
+    calls = []
+
+    def failing_simplifier(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise TypeError("ambiguous wrapped simplifier failure")
+
+    simplify = functools.partial(failing_simplifier)
+    setattr(simplify, "__signature__", "unavailable")
+
+    class Mesh:
+        faces = [None] * 100_000
+        vertices = [None]
+        simplify_quadric_decimation = simplify
+
+    try:
+        policy.simplify_mesh_if_needed(Mesh(), 80_000)
+    except TypeError as exc:
+        assert str(exc) == "ambiguous wrapped simplifier failure"
+    else:
+        raise AssertionError("wrapped internal TypeError should propagate")
+
+    assert calls == [((), {"face_count": 80_000})]
