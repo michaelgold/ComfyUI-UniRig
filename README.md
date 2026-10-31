@@ -3,6 +3,10 @@
 
 # ComfyUI-UniRig
 
+## Optional SkinTokens rigging
+
+`SkinTokens: Rig GLB` runs upstream SkinTokens in a separate Python process and returns a downloadable GLB. Existing UniRig/MIA nodes are unchanged. See [setup, node inputs, and verification limitations](docs/skintokens.md).
+
 ## Installation
 
 Three options, in order of speed → reliability:

@@ -16,8 +16,10 @@ from .skeleton_io import (
     UniRigCompareSkeletons,
 )
 from .orientation_check import UniRigOrientationCheck
+from .skintokens import SkinTokensRigGLB
 
 NODE_CLASS_MAPPINGS = {
+    "SkinTokensRigGLB": SkinTokensRigGLB,
     "UniRigLoadMesh": UniRigLoadMesh,
     "UniRigSaveMesh": UniRigSaveMesh,
     "UniRigLoadModel": UniRigLoadModel,
@@ -37,6 +39,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "SkinTokensRigGLB": "SkinTokens: Rig GLB",
     "UniRigLoadMesh": "UniRig: Load Mesh",
     "UniRigSaveMesh": "UniRig: Save Mesh",
     "UniRigLoadModel": "UniRig: (Down)Load Model",
